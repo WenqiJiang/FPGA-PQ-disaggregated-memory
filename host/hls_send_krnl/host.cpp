@@ -163,12 +163,12 @@ int main(int argc, char **argv) {
     OCL_CHECK(err, err = q.enqueueTask(network_kernel));
     OCL_CHECK(err, err = q.finish());
     
-    uint32_t numPacketWord = 64;
-    uint32_t connection = 1;
-    uint32_t baseIpAddr = 0x0A01D46E;//alveo0
+    int32_t numPacketWord = 64;
+    int32_t connection = 1;
+    int32_t baseIpAddr = 0x0A01D46E;//alveo0
     // uint32_t baseIpAddr = 0x0A01D481; //alveo4b
-    uint32_t basePort = 5001; 
-    uint32_t delayedCycles = 0;
+    int32_t basePort = 5001; 
+    int32_t delayedCycles = 0;
     uint64_t txPkt = 3200;
 
     if(argc >= 3)

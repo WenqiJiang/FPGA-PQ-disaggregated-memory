@@ -165,10 +165,10 @@ int main(int argc, char **argv) {
     OCL_CHECK(err, err = q.enqueueTask(network_kernel));
     OCL_CHECK(err, err = q.finish());
     
-    uint32_t connection = 1;
-    uint32_t basePort = 5001; 
-    uint32_t delayedCycles = 0;
-    uint32_t rxByteCnt = 320000;
+    int32_t connection = 1;
+    int32_t basePort = 5001; 
+    int32_t delayedCycles = 0;
+    uint64_t rxByteCnt = 320000;
 
     if(argc >=3)
         rxByteCnt = strtol(argv[2], NULL, 10);

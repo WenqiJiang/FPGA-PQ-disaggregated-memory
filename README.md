@@ -2,6 +2,80 @@
 
 This repository provides TCP/IP network support at 100 Gbit/s in Vitis and provides several examples to demonstrate the usage. 
 
+## Wenqi Commands
+
+Build network kernel.
+
+```
+git submodule update --init --recursive
+mkdir build
+cd build
+cmake .. -DFDEV_NAME=u250 -DTCP_STACK_EN=1 -DTCP_STACK_RX_DDR_BYPASS_EN=1 
+make installip
+```
+
+Build kernel.
+
+```
+cd ../
+make all TARGET=hw DEVICE=/opt/xilinx/platforms/xilinx_u250_gen3x16_xdma_4_1_202210_1/xilinx_u250_gen3x16_xdma_4_1_202210_1.xpfm USER_KRNL=hls_recv_krnl USER_KRNL_MODE=hls NETH=4
+```
+
+### FPGA Net
+
+#### IP addr U250
+
+alveo-u250-01: 10.253.74.12
+
+alveo-u250-02: 10.253.74.16
+
+alveo-u250-03: 10.253.74.20
+
+alveo-u250-04: 10.253.74.24
+
+#### build host
+
+Method 1: in Makefile, add the USER_KRNL variable. e.g., `USER_KRNL=hls_recv_krnl`. Then:
+
+```
+rm host/host
+make exe
+```
+
+Method 2: compile the kernel, replcae `host/hls_recv_krnl/host.cpp` with the right host file path.
+
+```
+g++ -I.//common/includes/xcl2 -I/home/wejiang/opt/xilinx/xrt/include -I/tools/Xilinx//Vivado/2022.1/include -Wall -O0 -g -std=gnu++14 -DVITIS_PLATFORM=xilinx_u280_xdma_201920_3 -fmessage-length=0 .//common/includes/xcl2/xcl2.cpp host/hls_recv_krnl/host.cpp   -o 'host/host'  -L/home/wejiang/opt/xilinx/xrt/lib -lOpenCL -lpthread  -lrt -lstdc++
+```
+
+#### hls_recv_krnl
+
+<host_exe> <XCLBIN File> [<#RxByte> <Port> <local_IP> <boardNum>]
+
+Received kernel tested with u250-03 using 1MB data.
+
+```
+# For u250-03
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 1000000 8888 10.253.74.20 1
+```
+
+#### hls_send_krnl
+
+<host_exe> <XCLBIN File> [<#Tx Pkt> <IP address in format: 10.1.212.121> <Port> <local_IP> <boardNum> <packetWord>]
+
+Here, seems <packetWord> means the bytes per packet, and <#Tx Pkt> means number of packets to send.
+
+```
+    if(argc >= 3)
+        txPkt = strtol(argv[2], NULL, 10);
+    uint32_t numPacketWord = 64;
+```
+
+```
+# For u250-03, send to alveo-build-01, send 1024 * 64 = 64 KB data
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 1024 10.1.212.110 8888 10.253.74.20 1 64
+```
+
 ## Architecture Overview
 
 This repository creates designs with three Vitis kernels: `cmac` kernel, `network` kernel and `user` kernel. The `cmac` kernel and the `network` kernel serve as a common infrastructure for network functionality while the `user` kernel can be customized for each application.
