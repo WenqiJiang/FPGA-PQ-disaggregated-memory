@@ -679,6 +679,104 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
      while(sentByteCnt<expectedTxByteCnt);
 }
 
+// Wenqi: send data back to the input connection (1 connection only)
+// void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta, 
+//                hls::stream<pkt512>& m_axis_tcp_tx_data, 
+//                hls::stream<pkt64>& s_axis_tcp_tx_status,
+//                hls::stream<ap_uint<512> >& s_data_in,
+//                hls::stream<ap_uint<16> >& s_sessionID_in,
+//                ap_uint<64> expectedTxByteCnt, 
+//                int pkgWordCount
+//                 )
+// {
+// #pragma HLS INTERFACE ap_stable port=pkgWordCount
+// #pragma HLS INTERFACE ap_stable port=useConn
+// #pragma HLS INTERFACE ap_stable port=expectedTxByteCnt
+
+//      bool first_round = true;
+//      ap_uint<64> sentByteCnt = 0;
+//      int currentPkgWordCnt = 0;
+
+//      pkt32 tx_meta_pkt;
+//      appTxRsp resp;
+
+//      do{
+
+//           if (first_round)
+//           {
+//                ap_uint<16> sessionID = s_sessionID_in.read();
+//                tx_meta_pkt.data(15,0) = sessionID;
+//                tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
+//                m_axis_tcp_tx_meta.write(tx_meta_pkt);
+
+//                first_round = false;
+//           }
+//           else
+//           {
+//                // if (!s_axis_tcp_tx_status.empty())
+//                // {
+//                     pkt64 txStatus_pkt = s_axis_tcp_tx_status.read();
+//                     resp.sessionID = txStatus_pkt.data(15,0);
+//                     resp.length = txStatus_pkt.data(31,16);
+//                     resp.remaining_space = txStatus_pkt.data(61,32);
+//                     resp.error = txStatus_pkt.data(63,62);
+
+//                     if (resp.error == 0)
+//                     {
+//                          sentByteCnt = sentByteCnt + resp.length;
+
+//                          if (sentByteCnt < expectedTxByteCnt)
+//                          {
+//                               if (sentByteCnt + pkgWordCount*64 < expectedTxByteCnt )
+//                               {
+//                                   tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
+//                                   currentPkgWordCnt = pkgWordCount;
+//                               }
+//                               else
+//                               {
+//                                   tx_meta_pkt.data(31,16) = expectedTxByteCnt - sentByteCnt;
+//                                   currentPkgWordCnt = (expectedTxByteCnt - sentByteCnt)>>6;
+//                               }
+                              
+//                               m_axis_tcp_tx_meta.write(tx_meta_pkt);
+//                          }
+                         
+//                          for (int j = 0; j < currentPkgWordCnt; ++j)
+//                          {
+//                          #pragma HLS PIPELINE II=1
+//                               ap_uint<512> s_data = s_data_in.read();
+//                               pkt512 currWord;
+//                               for (int i = 0; i < (512/64); i++) 
+//                               {
+//                                    #pragma HLS UNROLL
+//                                    currWord.data(i*64+63, i*64) = s_data(i*64+63, i*64);
+//                                    currWord.keep(i*8+7, i*8) = 0xff;
+//                               }
+//                               currWord.last = (j == currentPkgWordCnt-1);
+//                               m_axis_tcp_tx_data.write(currWord);
+//                          }
+//                     }
+//                     else
+//                     {
+//                          //Check if connection  was torn down
+//                          if (resp.error == 1)
+//                          {
+//                               std::cout << "Connection was torn down. " << resp.sessionID << std::endl;
+//                          }
+//                          else
+//                          {
+//                               tx_meta_pkt.data(15,0) = resp.sessionID;
+//                               tx_meta_pkt.data(31,16) = resp.length;
+//                               m_axis_tcp_tx_meta.write(tx_meta_pkt);
+//                          }
+//                     }
+//                // }
+//           }
+          
+//      }
+//      while(sentByteCnt<expectedTxByteCnt);
+// }
+
 void ptr2Stream(ap_uint<512>* input, ap_uint<64> totalRxByteCnt, hls::stream<ap_uint<512> >& s_data_in )
 {
      ap_uint<32> totalRxWordCnt = totalRxByteCnt >> 6;
