@@ -16,6 +16,7 @@
 #define SEND_BYTES (1024 * 1024) // the number of bytes to be send
 
 #define PORT 8888
+// #define PORT 5002
 
 #define DEBUG
 
@@ -106,8 +107,9 @@ int main(int argc, char const *argv[])
     struct Thread_info t_info_0;
     //struct Thread_info t_info_1;
     t_info_0.port = PORT;
-    t_info_0.IP_addr = "10.1.212.110"; // alveo-build-01
-    // t_info_0.IP_addr = "10.253.74.20"; // alveo-u250-03
+    // t_info_0.IP_addr = "10.253.74.5"; // alveo-build-01
+    // t_info_0.IP_addr = "10.253.74.16"; // alveo-u250-02
+    t_info_0.IP_addr = "10.253.74.20"; // alveo-u250-03
     // t_info_0.IP_addr = "10.253.74.24"; // alveo-u250-04
     //t_info_1.port = PORT + 1;
 

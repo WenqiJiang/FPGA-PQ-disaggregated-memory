@@ -23,7 +23,15 @@ make all TARGET=hw DEVICE=/opt/xilinx/platforms/xilinx_u250_gen3x16_xdma_4_1_202
 
 ### FPGA Net
 
+#### IP addr server
+
+Use mellanox IPs
+
+alveo-build-01: 10.253.74.5
+
 #### IP addr U250
+
+Port range: 5001 - 5010 
 
 alveo-u250-01: 10.253.74.12
 
@@ -56,14 +64,16 @@ Received kernel tested with u250-03 using 1MB data.
 
 ```
 # For u250-03
-./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 1000000 8888 10.253.74.20 1
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 1000000 5001 10.253.74.20 1
 ```
 
 #### hls_send_krnl
 
+5001 worked, but somehow 5002 can establish the connection but not sending data.
+
 <host_exe> <XCLBIN File> [<#Tx Pkt> <IP address in format: 10.1.212.121> <Port> <local_IP> <boardNum> <packetWord>]
 
-Here, seems <packetWord> means the bytes per packet, and <#Tx Pkt> means number of packets to send.
+Here, <packetWord> means the number of 64-bytes per packet (e.g., packetWord=22 -> 22 x 64 = 1408 bytes per packet), and <#Tx Pkt> means number of packets to send.
 
 ```
     if(argc >= 3)
@@ -72,9 +82,22 @@ Here, seems <packetWord> means the bytes per packet, and <#Tx Pkt> means number 
 ```
 
 ```
-# For u250-03, send to alveo-build-01, send 1024 * 64 = 64 KB data
-./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 1024 10.1.212.110 8888 10.253.74.20 1 64
+# For u250-03, send to alveo-build-01, send 1024 * 16 * 64 = 1 MB data
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 1024 10.253.74.5 5001 10.253.74.20 1 16
 ```
+
+#### hls_recv_send_krnl
+
+<host_exe> <XCLBIN File 1> [<local_FPGA_IP 2> <boardNum 3>] [<#RxByte 4> <RxPort 5>] [<TxIP 6> <TxPort 7> <TxpkgWordCountTx 8>]
+
+Here, <packetWord> means the number of 64-bytes per packet (e.g., packetWord=22 -> 22 x 64 = 1408 bytes per packet).
+
+```
+# For u250-03, recv send to alveo-build-01, send 1024 * 1024= 1048576 B data
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.20 1 1048576 5002 10.253.74.5 5001 16
+```
+
+
 
 ## Architecture Overview
 

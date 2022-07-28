@@ -12,9 +12,9 @@
 #include <pthread.h> 
 
 //#define RECV_BYTES 1
-#define RECV_BYTES (1024 * 64) // the number of bytes to be send
+#define RECV_BYTES (1024 * 1024) // the number of bytes to be received
 
-#define PORT 8888
+#define PORT 5004
 
 #define DEBUG
 
@@ -23,7 +23,7 @@ struct Thread_info {
 };
 
 // A normal C function that is executed as a thread  
-void *thread_send_packets(void* vargp) 
+void *thread_recv_packets(void* vargp) 
 { 
 
     struct Thread_info* t_info = (struct Thread_info*) vargp;
@@ -120,8 +120,8 @@ int main(int argc, char const *argv[])
     struct Thread_info t_info_0;
     t_info_0.port = PORT;
 
-    pthread_create(&thread_id, NULL, thread_send_packets, (void*) &t_info_0); 
-    // pthread_create(&thread_id, NULL, thread_send_packets, NULL); 
+    pthread_create(&thread_id, NULL, thread_recv_packets, (void*) &t_info_0); 
+    // pthread_create(&thread_id, NULL, thread_recv_packets, NULL); 
     pthread_join(thread_id, NULL); 
     printf("After Thread\n"); 
 
