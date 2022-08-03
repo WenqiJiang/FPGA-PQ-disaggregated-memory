@@ -109,8 +109,8 @@ int main(int argc, char const *argv[])
     t_info_0.port = PORT;
     // t_info_0.IP_addr = "10.253.74.5"; // alveo-build-01
     // t_info_0.IP_addr = "10.253.74.16"; // alveo-u250-02
-    t_info_0.IP_addr = "10.253.74.20"; // alveo-u250-03
-    // t_info_0.IP_addr = "10.253.74.24"; // alveo-u250-04
+    // t_info_0.IP_addr = "10.253.74.20"; // alveo-u250-03
+    t_info_0.IP_addr = "10.253.74.24"; // alveo-u250-04
     //t_info_1.port = PORT + 1;
 
     pthread_create(&thread_id_0, NULL, thread_send_packets, (void*) &t_info_0); 

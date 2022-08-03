@@ -600,11 +600,16 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
 
           if (first_round)
           {
-               tx_meta_pkt.data(15,0) = sessionID[currentSessionIndex];
-               tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
-               m_axis_tcp_tx_meta.write(tx_meta_pkt);
+               // Wenqi: only send out tx meta when data is ready, otherwise deadlock may appear
+               if (!s_data_in.empty()) {
+                    tx_meta_pkt.data(15,0) = sessionID[currentSessionIndex];
+                    tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
+                    m_axis_tcp_tx_meta.write(tx_meta_pkt);
 
-               first_round = false;
+                    first_round = false;
+               } else {
+                    continue;
+               }
           }
           else
           {

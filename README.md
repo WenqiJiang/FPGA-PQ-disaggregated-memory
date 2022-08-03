@@ -88,13 +88,15 @@ Here, <packetWord> means the number of 64-bytes per packet (e.g., packetWord=22 
 
 #### hls_recv_send_krnl
 
-<host_exe> <XCLBIN File 1> [<local_FPGA_IP 2> <boardNum 3>] [<#RxByte 4> <RxPort 5>] [<TxIP 6> <TxPort 7> <TxpkgWordCountTx 8>]
+<host_exe> <XCLBIN File 1> [<local_FPGA_IP 2> <boardNum 3>] [<#useConn 4>] [<#RxByte 5> <RxPort 6>] [<TxIP 7> <TxPort 8> <expectedTxPkgCnt 9> <TxpkgWordCountTx 10>]
 
 Here, <packetWord> means the number of 64-bytes per packet (e.g., packetWord=22 -> 22 x 64 = 1408 bytes per packet).
 
+Don't use consecutive ports for send/recv, which might lead to problems.
+
 ```
-# For u250-03, recv send to alveo-build-01, send 1024 * 1024= 1048576 B data
-./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.20 1 1048576 5002 10.253.74.5 5001 16
+# For u250-03, recv send to alveo-build-04, send 1024 * 1024= 1048576 B data
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 1 1 1048576 8888 10.253.74.5 5003 1024 16
 ```
 
 

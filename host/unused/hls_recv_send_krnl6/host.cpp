@@ -48,7 +48,7 @@ void wait_for_enter(const std::string &msg) {
 int main(int argc, char **argv) {
     if (argc < 2) {
         // Rx bytes = Tx byte (forwarding the data)
-        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> [<local_FPGA_IP 2> <boardNum 3>] [<#useConn 4>] [<#RxByte 5> <RxPort 6>] [<TxIP 7> <TxPort 8> <expectedTxPkgCnt 9> <TxpkgWordCountTx 10>]" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> [<local_FPGA_IP 2> <boardNum 3>] [<#RxByte 4> <RxPort 5>] [<TxIP 6> <TxPort 7> <TxpkgWordCountTx 8>]" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -124,7 +124,7 @@ int main(int argc, char **argv) {
         } else {
             std::cout << "Device[" << i << "]: program successful!\n";
             OCL_CHECK(err,
-                      network_kernel = cl::Kernel(program, "network_krnl", &err));
+                      network_kernel = cl::Kernel(program, "network_krnl6", &err));
             OCL_CHECK(err,
                       user_kernel = cl::Kernel(program, "hls_recv_send_krnl", &err));
             valid_device++;
@@ -164,29 +164,24 @@ int main(int argc, char **argv) {
     OCL_CHECK(err, err = q.enqueueTask(network_kernel));
     OCL_CHECK(err, err = q.finish());
     
-    int32_t useConn = 1;
-    if(argc >=5)
-        useConn = strtol(argv[4], NULL, 10);
-
     // Rx
     int32_t basePortRx = 5001; 
     uint64_t rxByteCnt = 320000;
 
-    if(argc >=6)
-        rxByteCnt = strtol(argv[5], NULL, 10);
+    if(argc >=5)
+        rxByteCnt = strtol(argv[4], NULL, 10);
 
-    if(argc >= 7)
-        basePortRx = strtol(argv[6], NULL, 10);
+    if(argc >= 6)
+        basePortRx = strtol(argv[5], NULL, 10);
 
     // Tx
     int32_t TxIPAddr = 0x0A01D46E;//alveo0
     int32_t basePortTx = 5002; 
-    uint64_t expectedTxPkgCnt = 1024;
-    int32_t numPacketWord = 16; // or 64, 16, etc.
+    int32_t numPacketWord = 22; // or 64, 16, etc.
 
-    if (argc >= 8)
+    if (argc >= 7)
     {
-        std::string s = argv[7];
+        std::string s = argv[6];
         std::string delimiter = ".";
         int ip [4];
         size_t pos = 0;
@@ -202,45 +197,32 @@ int main(int argc, char **argv) {
         TxIPAddr = ip[3] | (ip[2] << 8) | (ip[1] << 16) | (ip[0] << 24);
     }
 
+    if (argc >= 8)
+    {
+        basePortTx = strtol(argv[7], NULL, 10);
+    }
+
     if (argc >= 9)
     {
-        basePortTx = strtol(argv[8], NULL, 10);
-    }
-
-    if (argc >= 10)
-    {
-        expectedTxPkgCnt = strtol(argv[9], NULL, 10);
-    }
-
-    if (argc >= 11)
-    {
-        numPacketWord = strtol(argv[10], NULL, 10);
+        numPacketWord = strtol(argv[8], NULL, 10);
     }
 
     //Set user Kernel Arguments
     //Set user Kernel Arguments
     int start_param = 16;
-
-    std::cout << "useConn: " << useConn << std::endl; 
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 0, useConn));
-
     std::cout << "basePortRx: " << basePortRx << std::endl; 
     std::cout << "rxByteCnt: " << rxByteCnt << std::endl; 
 
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 1, basePortRx));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 2, rxByteCnt));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param + 0, basePortRx));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param + 1, rxByteCnt));
 
     printf("TxIPAddr:%x \n", TxIPAddr);
     std::cout << "basePortTx: " << basePortTx << std::endl; 
-    std::cout << "expectedTxPkgCnt: " << expectedTxPkgCnt << std::endl; 
     std::cout << "numPacketWord: " << numPacketWord << std::endl; 
-    std::cout << "(calculated) expected Tx bytes: expectedTxPkgCnt * numPacketWord * 64: " << 
-        expectedTxPkgCnt * numPacketWord * 64 << std::endl; 
     
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 3, TxIPAddr));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 4, basePortTx));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 5, expectedTxPkgCnt));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param + 6, numPacketWord));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param + 2, TxIPAddr));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param + 3, basePortTx));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param + 4, numPacketWord));
 
     double durationUs = 0.0;
 

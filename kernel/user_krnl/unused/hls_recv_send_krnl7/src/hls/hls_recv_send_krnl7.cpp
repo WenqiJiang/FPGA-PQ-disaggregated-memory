@@ -31,11 +31,35 @@
 #include "hls_stream.h"
 
 /*
+Debug: use pure send in recv_send_krnl
+
+
 Receive data from connection A, then forward the data to connection B
 Support 1 connection per direction only.
 */
+
+void traffic_gen(int pkgWordCount, ap_uint<64> expectedTxPkgCnt, hls::stream<ap_uint<512> >& s_data_in)
+{
+#pragma HLS dataflow
+
+     for (int i = 0; i < expectedTxPkgCnt; ++i)
+     {
+          for (int j = 0; j < pkgWordCount; ++j)
+          {
+
+               ap_uint<512> s_data;
+               for (int k = 0; k < (512/32); k++)
+               {
+                    #pragma HLS UNROLL
+                    s_data(k*32+31, k*32) = i*pkgWordCount+j;
+               }
+               s_data_in.write(s_data);
+          }
+     }
+}
+
 extern "C" {
-void hls_recv_send_krnl(
+void hls_recv_send_krnl7(
                // Internal Stream
                hls::stream<pkt512>& s_axis_udp_rx, 
                hls::stream<pkt512>& m_axis_udp_tx, 
@@ -54,15 +78,14 @@ void hls_recv_send_krnl(
                hls::stream<pkt32>& m_axis_tcp_tx_meta, 
                hls::stream<pkt512>& m_axis_tcp_tx_data, 
                hls::stream<pkt64>& s_axis_tcp_tx_status,
-               // Rx & Tx
-               int useConn,
                // Rx
-               int basePortRx, 
-               ap_uint<64> expectedRxByteCnt, // for input & output
+               // int basePortRx, 
+               // ap_uint<64> expectedRxByteCnt, // for input & output
+               int useConn,
+               int expectedTxPkgCnt,
                // Tx
                int baseIpAddressTx,
                int basePortTx, 
-               ap_uint<64> expectedTxPkgCnt,
                int pkgWordCountTx // number of 64-byte words per packet, e.g, 16 or 22
                       ) {
 
@@ -83,37 +106,48 @@ void hls_recv_send_krnl(
 #pragma HLS INTERFACE axis port = m_axis_tcp_tx_meta
 #pragma HLS INTERFACE axis port = m_axis_tcp_tx_data
 #pragma HLS INTERFACE axis port = s_axis_tcp_tx_status
-
+// #pragma HLS INTERFACE s_axilite port=basePortRx bundle = control
+// #pragma HLS INTERFACE s_axilite port=expectedRxByteCnt bundle = control
 #pragma HLS INTERFACE s_axilite port=useConn bundle = control
-#pragma HLS INTERFACE s_axilite port=basePortRx bundle = control
-#pragma HLS INTERFACE s_axilite port=expectedRxByteCnt bundle = control
+#pragma HLS INTERFACE s_axilite port=expectedTxPkgCnt bundle = control
 #pragma HLS INTERFACE s_axilite port=baseIpAddressTx bundle=control
 #pragma HLS INTERFACE s_axilite port=basePortTx bundle = control
-#pragma HLS INTERFACE s_axilite port=expectedTxPkgCnt bundle = control
 #pragma HLS INTERFACE s_axilite port=pkgWordCountTx bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = control
 
+
 #pragma HLS dataflow
+
 
 ////////////////////     Recv     ////////////////////
           
-          listenPorts(
-               basePortRx, 
-               useConn, 
-               m_axis_tcp_listen_port, 
+          // listenPorts(
+          //      basePortRx, 
+          //      useConn, 
+          //      m_axis_tcp_listen_port, 
+          //      s_axis_tcp_port_status);
+
+          // recvData(expectedRxByteCnt, 
+          //      s_data,
+          //      s_axis_tcp_notification, 
+          //      m_axis_tcp_read_pkg, 
+          //      s_axis_tcp_rx_meta, 
+          //      s_axis_tcp_rx_data);
+
+          tie_off_tcp_listen_port( m_axis_tcp_listen_port, 
                s_axis_tcp_port_status);
 
-     hls::stream<ap_uint<512>> s_data;
-#pragma HLS STREAM variable=s_data depth=512
-
-          recvData(expectedRxByteCnt, 
-               s_data,
-               s_axis_tcp_notification, 
+          
+          tie_off_tcp_rx(s_axis_tcp_notification, 
                m_axis_tcp_read_pkg, 
                s_axis_tcp_rx_meta, 
                s_axis_tcp_rx_data);
-
+    
 ////////////////////     Send     ////////////////////
+
+
+static hls::stream<ap_uint<512> >    s_data;
+#pragma HLS STREAM variable=s_data depth=512
 
           ap_uint<16> sessionID [8];
 
@@ -124,6 +158,8 @@ void hls_recv_send_krnl(
                m_axis_tcp_open_connection, 
                s_axis_tcp_open_status, 
                sessionID);
+
+          traffic_gen( pkgWordCountTx, expectedTxPkgCnt, s_data);
 
           ap_uint<64> expectedTxByteCnt = expectedTxPkgCnt * pkgWordCountTx * 64;
           sendData(
