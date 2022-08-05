@@ -6,3 +6,4 @@ scripts/
 tmp_kernel*
 *.log
 *.jou
+.ipcache

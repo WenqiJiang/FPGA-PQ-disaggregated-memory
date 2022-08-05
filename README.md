@@ -14,11 +14,17 @@ cmake .. -DFDEV_NAME=u250 -DTCP_STACK_EN=1 -DTCP_STACK_RX_DDR_BYPASS_EN=1
 make installip
 ```
 
+Remove one line from Makefile to enable customized frequency:
+
+```
+# CLFLAGS += --kernel_frequency 200
+```
+
 Build kernel.
 
 ```
 cd ../
-make all TARGET=hw DEVICE=/opt/xilinx/platforms/xilinx_u250_gen3x16_xdma_4_1_202210_1/xilinx_u250_gen3x16_xdma_4_1_202210_1.xpfm USER_KRNL=hls_recv_krnl USER_KRNL_MODE=hls NETH=4
+time make all TARGET=hw DEVICE=/opt/xilinx/platforms/xilinx_u250_gen3x16_xdma_4_1_202210_1/xilinx_u250_gen3x16_xdma_4_1_202210_1.xpfm USER_KRNL=hls_recv_krnl USER_KRNL_MODE=hls NETH=4 > out 2>&1
 ```
 
 ### FPGA Net
