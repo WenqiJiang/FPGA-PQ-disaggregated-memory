@@ -116,7 +116,7 @@ void network_output_processing(
     // packet 0: header (query_id, topK)
     // packet 1~k: topK results_pair (vec_ID, dist) -> size = ceil(topK * 8 / 64) 
 
-    // in 512-byte packets
+    // in 512-bit packets
     const int size_results_vec_ID = PRIORITY_QUEUE_LEN_L2 * 64 % 512 == 0?
         PRIORITY_QUEUE_LEN_L2 * 64 / 512 : PRIORITY_QUEUE_LEN_L2 * 64 / 512 + 1;
     const int size_results_dist = PRIORITY_QUEUE_LEN_L2 * 32 % 512 == 0?

@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// #include "host.hpp"
 #include "constants.hpp"
 
 #include "xcl2.hpp"
@@ -31,7 +30,7 @@ int main(int argc, char **argv) {
 
     //////////     Part 1. Parse the arguments & Program the FPGA     //////////
 
-    if (argc != 7) {
+    if (argc != 6) {
         // Rx bytes = Tx byte (forwarding the data)
         std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5>" << std::endl;
         return EXIT_FAILURE;
@@ -280,7 +279,7 @@ int main(int argc, char **argv) {
     auto start_load = std::chrono::high_resolution_clock::now();
 
     // in init
-    size_t query_num = 10000;
+    size_t query_num = 100;
     size_t nlist = 32768;
     size_t nprobe = 32;
 
@@ -457,9 +456,10 @@ int main(int argc, char **argv) {
     uint32_t boardNum = 1;
     int32_t useConn = 1;
     uint64_t rxByteCnt = in_DRAM_bytes;
-    int32_t numPacketWord = 16; // or 64, 16, etc.
-    uint64_t expectedTxPkgCnt = out_bytes / numPacketWord / 16;
-    assert(out_bytes % (numPacketWord * 16) == 0);
+    int32_t numPacketWord = 1; // or 64, 16, etc.
+    // int32_t numPacketWord = 16; // or 64, 16, etc.
+    uint64_t expectedTxPkgCnt = out_bytes / numPacketWord / 64;
+    assert(out_bytes % (numPacketWord * 64) == 0);
 
     printf("local_IP:%x, boardNum:%d\n", local_IP, boardNum); 
 

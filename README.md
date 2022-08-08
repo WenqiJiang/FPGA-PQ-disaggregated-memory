@@ -35,9 +35,13 @@ Use mellanox IPs
 
 alveo-build-01: 10.253.74.5
 
-#### IP addr U250
+#### IP / Port U250
 
-Port range: 5001 - 5010 
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port, which might not be available for awhile; the CPU->FPGA side can remain the same**
+
+FPGA -> CPU (hls_send) Port range: 5001 - 5010 
+
+CPU -> FPGA (hls_recv): more flexible, e.g., 8888 is usable
 
 alveo-u250-01: 10.253.74.12
 
@@ -100,11 +104,24 @@ Here, <packetWord> means the number of 64-bytes per packet (e.g., packetWord=22 
 
 Don't use consecutive ports for send/recv, which might lead to problems.
 
+
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001), which might not be available for awhile; the CPU->FPGA side can remain the same**
+
 ```
 # For u250-03, recv send to alveo-build-04, send 1024 * 1024= 1048576 B data
 ./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 1 1 1048576 8888 10.253.74.5 5003 1024 16
 ```
 
+#### entire_accelerator_v2
+
+<host_exe> <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5>
+
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001), which might not be available for awhile; the CPU->FPGA side can remain the same**
+
+```
+# For u250-04 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8888 10.253.74.5 5001
+```
 
 
 ## Architecture Overview

@@ -1,3 +1,5 @@
+// Slowly sending the packets, to avoid back-pressure on FPGAs (which handles recv & send)
+
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
 
 // Client side C/C++ program to demonstrate Socket programming 
@@ -13,7 +15,7 @@
 
 //#define SEND_BYTES 1
 // #define SEND_BYTES (1024 * 1024) // the number of bytes to be send
-#define SEND_BYTES 17088 // the number of bytes to be send
+#define SEND_BYTES (17088 * 100) // the number of bytes to be send
 
 #define PORT 8888
 // #define PORT 5002
@@ -77,6 +79,11 @@ void *thread_send_packets(void* vargp)
 	    int send_bytes_this_iter = (SEND_BYTES - total_sent_bytes) < 4096? (SEND_BYTES - total_sent_bytes) : 4096;
         int sent_bytes = send(sock, send_buf + total_sent_bytes, send_bytes_this_iter, 0);
         total_sent_bytes += sent_bytes;
+
+        // slow down the sending
+        volatile int count = 0;
+        for (int count_id = 0; count_id < 100000000; count_id++) { count++; }
+
         if (sent_bytes == -1) {
             printf("Sending data UNSUCCESSFUL!\n");
             return 0;
