@@ -25,6 +25,7 @@ help::
 	$(ECHO) "      By default, HOST_ARCH=x86. HOST_ARCH and SYSROOT is required for SoC shells"
 	$(ECHO) ""
 
+USER_KRNL = entire_accelerator_v2
 # Points to top directory of Git repository
 COMMON_REPO = ./
 PWD = $(shell readlink -f .)
