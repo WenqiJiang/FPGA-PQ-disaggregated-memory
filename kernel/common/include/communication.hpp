@@ -684,12 +684,13 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
      while(sentByteCnt<expectedTxByteCnt);
 }
 
-// Wenqi: send data back to the input connection (1 connection only)
-// void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta, 
+// Wenqi: for all the iterations, only send out tx_meta when input data is available
+// void sendDataProtected(hls::stream<pkt32>& m_axis_tcp_tx_meta, 
 //                hls::stream<pkt512>& m_axis_tcp_tx_data, 
 //                hls::stream<pkt64>& s_axis_tcp_tx_status,
 //                hls::stream<ap_uint<512> >& s_data_in,
-//                hls::stream<ap_uint<16> >& s_sessionID_in,
+//                ap_uint<16>* sessionID,
+//                int useConn,
 //                ap_uint<64> expectedTxByteCnt, 
 //                int pkgWordCount
 //                 )
@@ -701,25 +702,29 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
 //      bool first_round = true;
 //      ap_uint<64> sentByteCnt = 0;
 //      int currentPkgWordCnt = 0;
-
-//      pkt32 tx_meta_pkt;
-//      appTxRsp resp;
+//      int currentSessionIndex = 0;
 
 //      do{
+//           pkt32 tx_meta_pkt;
+//           appTxRsp resp;
 
 //           if (first_round)
 //           {
-//                ap_uint<16> sessionID = s_sessionID_in.read();
-//                tx_meta_pkt.data(15,0) = sessionID;
-//                tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
-//                m_axis_tcp_tx_meta.write(tx_meta_pkt);
+//                // Wenqi: only send out tx meta when data is ready, otherwise deadlock may appear
+//                if (!s_data_in.empty()) {
+//                     tx_meta_pkt.data(15,0) = sessionID[currentSessionIndex];
+//                     tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
+//                     m_axis_tcp_tx_meta.write(tx_meta_pkt);
 
-//                first_round = false;
+//                     first_round = false;
+//                } else {
+//                     continue;
+//                }
 //           }
 //           else
 //           {
-//                // if (!s_axis_tcp_tx_status.empty())
-//                // {
+//                if (!s_axis_tcp_tx_status.empty())
+//                {
 //                     pkt64 txStatus_pkt = s_axis_tcp_tx_status.read();
 //                     resp.sessionID = txStatus_pkt.data(15,0);
 //                     resp.length = txStatus_pkt.data(31,16);
@@ -728,24 +733,20 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
 
 //                     if (resp.error == 0)
 //                     {
-//                          sentByteCnt = sentByteCnt + resp.length;
-
+//                          // compute currentPkgWordCnt
 //                          if (sentByteCnt < expectedTxByteCnt)
 //                          {
 //                               if (sentByteCnt + pkgWordCount*64 < expectedTxByteCnt )
 //                               {
-//                                   tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
 //                                   currentPkgWordCnt = pkgWordCount;
 //                               }
 //                               else
 //                               {
-//                                   tx_meta_pkt.data(31,16) = expectedTxByteCnt - sentByteCnt;
 //                                   currentPkgWordCnt = (expectedTxByteCnt - sentByteCnt)>>6;
 //                               }
-                              
-//                               m_axis_tcp_tx_meta.write(tx_meta_pkt);
 //                          }
-                         
+
+//                          // send the data first
 //                          for (int j = 0; j < currentPkgWordCnt; ++j)
 //                          {
 //                          #pragma HLS PIPELINE II=1
@@ -760,6 +761,34 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
 //                               currWord.last = (j == currentPkgWordCnt-1);
 //                               m_axis_tcp_tx_data.write(currWord);
 //                          }
+
+//                          // update counters
+//                          sentByteCnt = sentByteCnt + resp.length;
+
+//                          currentSessionIndex++;
+//                          if (currentSessionIndex == useConn)
+//                          {
+//                               currentSessionIndex = 0;
+//                          }
+
+//                          // writing the next meta for the next pkt
+//                          if (sentByteCnt < expectedTxByteCnt)
+//                          {
+//                               tx_meta_pkt.data(15,0) = sessionID[currentSessionIndex];
+//                               if (sentByteCnt + pkgWordCount*64 < expectedTxByteCnt )
+//                               {
+//                                   tx_meta_pkt.data(31,16) = pkgWordCount*(512/8);
+//                               }
+//                               else
+//                               {
+//                                   tx_meta_pkt.data(31,16) = expectedTxByteCnt - sentByteCnt;
+//                               }
+                              
+//                               volatile int counter = 0;
+//                               while (s_data_in.empty()) { counter++; }
+//                               m_axis_tcp_tx_meta.write(tx_meta_pkt);
+//                          }
+                         
 //                     }
 //                     else
 //                     {
@@ -775,12 +804,13 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
 //                               m_axis_tcp_tx_meta.write(tx_meta_pkt);
 //                          }
 //                     }
-//                // }
+//                }
 //           }
           
 //      }
 //      while(sentByteCnt<expectedTxByteCnt);
 // }
+
 
 void ptr2Stream(ap_uint<512>* input, ap_uint<64> totalRxByteCnt, hls::stream<ap_uint<512> >& s_data_in )
 {
@@ -1342,6 +1372,40 @@ void recvData_handshake(ap_uint<64> expRxBytePerSession,
      }while(rxByteCnt < expRxBytePerSession);
 }
 
+// Wenqi: resolve TCP backpressure
+void recvData_handshake(ap_uint<64> expRxBytePerSession, 
+               hls::stream<pkt128>& s_axis_tcp_notification, 
+               hls::stream<pkt32>& m_axis_tcp_read_pkg,
+               hls::stream<ap_uint<16> >& nextRxPacketLength,
+               hls::stream<int>& s_consumeDataReady)
+{
+     ap_uint<64> rxByteCnt = 0;
+
+     do{
+          if (!s_axis_tcp_notification.empty() & !s_consumeDataReady.empty())
+          {
+               int ready = s_consumeDataReady.read();
+               pkt128 tcp_notification_pkt = s_axis_tcp_notification.read();
+               ap_uint<16> sessionID = tcp_notification_pkt.data(15,0);
+               ap_uint<16> length = tcp_notification_pkt.data(31,16);
+               ap_uint<32> ipAddress = tcp_notification_pkt.data(63,32);
+               ap_uint<16> dstPort = tcp_notification_pkt.data(79,64);
+               ap_uint<1> closed = tcp_notification_pkt.data(80,80);
+
+               if (length!=0)
+               {
+                    pkt32 readRequest_pkt;
+                    readRequest_pkt.data(15,0) = sessionID;
+                    readRequest_pkt.data(31,16) = length;
+                    m_axis_tcp_read_pkg.write(readRequest_pkt);
+                    nextRxPacketLength.write(length);
+                    rxByteCnt = rxByteCnt + length;
+               }
+          }
+
+     }while(rxByteCnt < expRxBytePerSession);
+}
+
 void recvData_consumeData(ap_uint<64> expRxBytePerSession, 
                hls::stream<pkt16>& s_axis_tcp_rx_meta, 
                hls::stream<pkt512>& s_axis_tcp_rx_data,
@@ -1392,6 +1456,39 @@ void recvData_consumeData(ap_uint<64> expRxBytePerSession,
      }while(rxByteCnt < expRxBytePerSession);
 }
 
+// wenqi: resolve TCP back pressure problem
+void recvData_consumeData(ap_uint<64> expRxBytePerSession, 
+               hls::stream<pkt16>& s_axis_tcp_rx_meta, 
+               hls::stream<pkt512>& s_axis_tcp_rx_data,
+               hls::stream<ap_uint<16> >& nextRxPacketLength,
+               hls::stream<ap_uint<512> >& s_data_out, 
+               hls::stream<int>& s_consumeDataReady)
+{
+     ap_uint<64> rxByteCnt = 0;
+     ap_uint<16> length;
+
+     s_consumeDataReady.write(1);
+
+     do{
+          if (!s_axis_tcp_rx_meta.empty() & !nextRxPacketLength.empty())
+          {
+               s_axis_tcp_rx_meta.read();
+               length = nextRxPacketLength.read();
+               bool lastWord = false;
+               do{
+                    pkt512 rx_data = s_axis_tcp_rx_data.read();
+                    lastWord = rx_data.last;
+                    s_data_out.write(rx_data.data);
+               }while(lastWord == false);
+               rxByteCnt = rxByteCnt + length;
+               if (rxByteCnt < expRxBytePerSession) {
+                    s_consumeDataReady.write(1); // no write in the last iteration
+               }
+          }
+
+     }while(rxByteCnt < expRxBytePerSession);
+}
+
 void recvData(ap_uint<64> expRxBytePerSession, 
                hls::stream<pkt128>& s_axis_tcp_notification, 
                hls::stream<pkt32>& m_axis_tcp_read_pkg, 
@@ -1436,6 +1533,40 @@ void recvData(ap_uint<64> expRxBytePerSession,
                s_axis_tcp_rx_data,
                nextRxPacketLength,
                s_data_out);
+}
+
+// wenqi: resolve TCP back pressure problem
+// In the default recvData, recvData_handshake will continue no matter whether the 
+//   s_data_out FIFO is full, thus can cause deadlock behavior when recv throughput > send throughput
+// This version solved the problem: only the data from the network stack has been written to s_data_out
+//   does the handshake for the next packet begins.
+void recvDataSafe(ap_uint<64> expRxBytePerSession, 
+               hls::stream<ap_uint<512> >& s_data_out,
+               hls::stream<pkt128>& s_axis_tcp_notification, 
+               hls::stream<pkt32>& m_axis_tcp_read_pkg, 
+               hls::stream<pkt16>& s_axis_tcp_rx_meta, 
+               hls::stream<pkt512>& s_axis_tcp_rx_data )
+{
+#pragma HLS dataflow disable_start_propagation
+
+     hls::stream<ap_uint<16> >    nextRxPacketLength;
+     #pragma HLS STREAM variable=nextRxPacketLength depth=512
+
+     hls::stream<int> s_consumeDataReady;
+     #pragma HLS STREAM variable=s_consumeDataReady depth=512
+
+     recvData_handshake(expRxBytePerSession, 
+               s_axis_tcp_notification, 
+               m_axis_tcp_read_pkg,
+               nextRxPacketLength,
+               s_consumeDataReady);
+
+     recvData_consumeData(expRxBytePerSession, 
+               s_axis_tcp_rx_meta, 
+               s_axis_tcp_rx_data,
+               nextRxPacketLength,
+               s_data_out,
+               s_consumeDataReady);
 }
 
 void recvDataPtr(ap_uint<64> expRxBytePerSession, 

@@ -34,16 +34,16 @@ void delay_processing(
      int delay_cycle_per_pkt,
      ap_uint<64> expectedTxPkgCnt,
      int pkgWordCountTx,
-     hls::stream<pkt512> s_input,
-     hls::stream<pkt512> s_output) {
+     hls::stream<ap_uint<512>> &s_input,
+     hls::stream<ap_uint<512>> &s_output) {
      
      // assume output = input size
      ap_uint<64> loop_count = expectedTxPkgCnt * pkgWordCountTx;
 
      for (size_t i = 0; i < loop_count; i++) {
-          volatile delay_counter = 0;
+          volatile int delay_counter = 0;
           for (int j = 0; j < delay_cycle_per_pkt; j++) { delay_counter++; }
-          s_output.write(s_input);
+          s_output.write(s_input.read());
      }
 }
 
@@ -122,15 +122,29 @@ void hls_recv_send_slow(
                m_axis_tcp_listen_port, 
                s_axis_tcp_port_status);
 
-     hls::stream<ap_uint<512>> s_data;
-#pragma HLS STREAM variable=s_data depth=512
+     hls::stream<ap_uint<512>> s_input;
+#pragma HLS STREAM variable=s_input depth=512
 
-          recvData(expectedRxByteCnt, 
-               s_data,
-               s_axis_tcp_notification, 
-               m_axis_tcp_read_pkg, 
-               s_axis_tcp_rx_meta, 
-               s_axis_tcp_rx_data);
+     hls::stream<ap_uint<512>> s_output;
+#pragma HLS STREAM variable=s_output depth=512
+
+
+    // Wenqi-customized recv function, resolve deadlock in the case that
+    //   input data rate >> FPGA query processing rate
+    recvDataSafe(expectedRxByteCnt, 
+        s_kernel_network_in,
+        s_axis_tcp_notification, 
+        m_axis_tcp_read_pkg, 
+        s_axis_tcp_rx_meta, 
+        s_axis_tcp_rx_data);
+
+          // Using recvData can lead to deadlock if the CPU sending speed (FPGA recv) is fast
+          // recvData(expectedRxByteCnt, 
+          //      s_input,
+          //      s_axis_tcp_notification, 
+          //      m_axis_tcp_read_pkg, 
+          //      s_axis_tcp_rx_meta, 
+          //      s_axis_tcp_rx_data);
 
           delay_processing(
                delay_cycle_per_pkt,
@@ -156,7 +170,7 @@ void hls_recv_send_slow(
                m_axis_tcp_tx_meta, 
                m_axis_tcp_tx_data, 
                s_axis_tcp_tx_status, 
-               s_data, 
+               s_output, 
                sessionID,
                useConn, 
                expectedTxByteCnt, 

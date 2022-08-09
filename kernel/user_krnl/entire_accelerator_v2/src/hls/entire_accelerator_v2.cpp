@@ -272,21 +272,23 @@ void entire_accelerator_v2(
 
 ////////////////////     Recv     ////////////////////
           
-          listenPorts(
-               basePortRx, 
-               useConn, 
-               m_axis_tcp_listen_port, 
-               s_axis_tcp_port_status);
+    listenPorts(
+        basePortRx, 
+        useConn, 
+        m_axis_tcp_listen_port, 
+        s_axis_tcp_port_status);
 
-     hls::stream<ap_uint<512>> s_kernel_network_in;
+    hls::stream<ap_uint<512>> s_kernel_network_in;
 #pragma HLS STREAM variable=s_kernel_network_in depth=512
 
-          recvData(expectedRxByteCnt, 
-               s_kernel_network_in,
-               s_axis_tcp_notification, 
-               m_axis_tcp_read_pkg, 
-               s_axis_tcp_rx_meta, 
-               s_axis_tcp_rx_data);
+    // Wenqi-customized recv function, resolve deadlock in the case that
+    //   input data rate >> FPGA query processing rate
+    recvDataSafe(expectedRxByteCnt, 
+        s_kernel_network_in,
+        s_axis_tcp_notification, 
+        m_axis_tcp_read_pkg, 
+        s_axis_tcp_rx_meta, 
+        s_axis_tcp_rx_data);
 
 
 ////////////////////     Network Input     ////////////////////
@@ -491,36 +493,37 @@ void entire_accelerator_v2(
 
 ////////////////////     Send     ////////////////////
 
-          ap_uint<16> sessionID [8];
+    ap_uint<16> sessionID [8];
 
-          openConnections(
-               useConn, 
-               baseIpAddressTx, 
-               basePortTx, 
-               m_axis_tcp_open_connection, 
-               s_axis_tcp_open_status, 
-               sessionID);
+    openConnections(
+        useConn, 
+        baseIpAddressTx, 
+        basePortTx, 
+        m_axis_tcp_open_connection, 
+        s_axis_tcp_open_status, 
+        sessionID);
 
-          ap_uint<64> expectedTxByteCnt = expectedTxPkgCnt * pkgWordCountTx * 64;
-          sendData(
-               m_axis_tcp_tx_meta, 
-               m_axis_tcp_tx_data, 
-               s_axis_tcp_tx_status, 
-               s_kernel_network_out, 
-               sessionID,
-               useConn, 
-               expectedTxByteCnt, 
-               pkgWordCountTx);
+    ap_uint<64> expectedTxByteCnt = expectedTxPkgCnt * pkgWordCountTx * 64;
+    sendData(
+        m_axis_tcp_tx_meta, 
+        m_axis_tcp_tx_data, 
+        s_axis_tcp_tx_status, 
+        s_kernel_network_out, 
+        sessionID,
+        useConn, 
+        expectedTxByteCnt, 
+        pkgWordCountTx);
 
 
 ////////////////////     Tie off     ////////////////////
 
-          tie_off_udp(s_axis_udp_rx, 
-               m_axis_udp_tx, 
-               s_axis_udp_rx_meta, 
-               m_axis_udp_tx_meta);
-    
-          tie_off_tcp_close_con(m_axis_tcp_close_connection);
+    tie_off_udp(s_axis_udp_rx, 
+        m_axis_udp_tx, 
+        s_axis_udp_rx_meta, 
+        m_axis_udp_tx_meta);
 
-     }
+    tie_off_tcp_close_con(m_axis_tcp_close_connection);
+
+}
+
 }

@@ -12,10 +12,10 @@
 #include <pthread.h> 
 
 //#define RECV_BYTES 1
-#define RECV_BYTES (1344 * 100) // the number of bytes to be received
-// #define RECV_BYTES (1024 * 1024) // the number of bytes to be received
+// #define RECV_BYTES (1344 * 100) // the number of bytes to be received
+#define RECV_BYTES (1024 * 1024) // the number of bytes to be received
 
-#define PORT 5004
+#define PORT 5002
 
 #define DEBUG
 

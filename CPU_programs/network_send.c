@@ -12,8 +12,8 @@
 #include <pthread.h> 
 
 //#define SEND_BYTES 1
-// #define SEND_BYTES (1024 * 1024) // the number of bytes to be send
-#define SEND_BYTES 17088 // the number of bytes to be send
+#define SEND_BYTES (1024 * 1024) // the number of bytes to be send
+// #define SEND_BYTES 17088 // the number of bytes to be send
 
 #define PORT 8888
 // #define PORT 5002

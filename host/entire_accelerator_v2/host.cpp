@@ -456,10 +456,10 @@ int main(int argc, char **argv) {
     uint32_t boardNum = 1;
     int32_t useConn = 1;
     uint64_t rxByteCnt = in_DRAM_bytes;
-    int32_t numPacketWord = 1; // or 64, 16, etc.
-    // int32_t numPacketWord = 16; // or 64, 16, etc.
-    uint64_t expectedTxPkgCnt = out_bytes / numPacketWord / 64;
-    assert(out_bytes % (numPacketWord * 64) == 0);
+    int32_t pkgWordCountTx = 1; // or 64, 16, etc.
+    // int32_t pkgWordCountTx = 16; // or 64, 16, etc.
+    uint64_t expectedTxPkgCnt = out_bytes / pkgWordCountTx / 64;
+    assert(out_bytes % (pkgWordCountTx * 64) == 0);
 
     printf("local_IP:%x, boardNum:%d\n", local_IP, boardNum); 
 
@@ -527,14 +527,14 @@ int main(int argc, char **argv) {
     printf("TxIPAddr:%x \n", TxIPAddr);
     std::cout << "basePortTx: " << basePortTx << std::endl; 
     std::cout << "expectedTxPkgCnt: " << expectedTxPkgCnt << std::endl; 
-    std::cout << "numPacketWord: " << numPacketWord << std::endl; 
-    std::cout << "(calculated) expected Tx bytes: expectedTxPkgCnt * numPacketWord * 64: " << 
-        expectedTxPkgCnt * numPacketWord * 64 << std::endl; 
+    std::cout << "pkgWordCountTx: " << pkgWordCountTx << std::endl; 
+    std::cout << "(calculated) expected Tx bytes: expectedTxPkgCnt * pkgWordCountTx * 64: " << 
+        expectedTxPkgCnt * pkgWordCountTx * 64 << std::endl; 
     
     OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 3, TxIPAddr));
     OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 4, basePortTx));
     OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 5, expectedTxPkgCnt));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 6, numPacketWord));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 6, pkgWordCountTx));
 
     int start_param_accelerator = 16 + 7;
 
