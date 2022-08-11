@@ -132,7 +132,7 @@ void hls_recv_send_slow(
     // Wenqi-customized recv function, resolve deadlock in the case that
     //   input data rate >> FPGA query processing rate
     recvDataSafe(expectedRxByteCnt, 
-        s_kernel_network_in,
+        s_input,
         s_axis_tcp_notification, 
         m_axis_tcp_read_pkg, 
         s_axis_tcp_rx_meta, 

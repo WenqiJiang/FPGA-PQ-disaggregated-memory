@@ -431,6 +431,13 @@ int main(int argc, char **argv) {
     }
     memcpy(&meta_data_init[2 * nlist], nlist_num_vecs_char, nlist_num_vecs_size);
     free(nlist_num_vecs_char);
+#ifdef DEBUG
+    for (int i = 0; i < nlist; i++) {
+        std::cout << "cell_ID = " << i << " nlist_PQ_codes_start_addr = " << meta_data_init[i] <<
+            " nlist_vec_ID_start_addr = " << meta_data_init[i + nlist] << 
+            " nlist_num_vecs = " << meta_data_init[i + 2 * nlist] << std::endl;
+    }
+#endif
 
     char* product_quantizer_char = (char*) malloc(product_quantizer_size);
     product_quantizer_fstream.read(product_quantizer_char, product_quantizer_size);

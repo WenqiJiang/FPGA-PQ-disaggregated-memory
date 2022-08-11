@@ -8,33 +8,37 @@
 #include <unistd.h> 
 #include <string.h> 
 #include <unistd.h>
-#include <time.h>
-#include <pthread.h> 
+#include <chrono>
+#include <thread>
 
-//#define RECV_BYTES 1
-#define RECV_BYTES 1344 // the number of bytes to be received
-// #define RECV_BYTES (1024 * 1024) // the number of bytes to be received
-
-#define PORT 5002
+#define RECV_PKG_SIZE 64 
+// #define RECV_PKG_SIZE 4096 
 
 #define DEBUG
 
-struct Thread_info {
-    int port;
-};
+void thread_recv_packets(unsigned int port, int recv_bytes); 
 
-// A normal C function that is executed as a thread  
-void *thread_recv_packets(void* vargp) 
+int main(int argc, char const *argv[]) 
 { 
+    int recv_bytes = 1024 * 1024; // the number of bytes to be received
+    // unsigned int port = 8880;
+    unsigned int port = 5001;
 
-    struct Thread_info* t_info = (struct Thread_info*) vargp;
-    printf("Printing Port from Thread %d\n", t_info -> port); 
+    std::thread th0(thread_recv_packets, port, recv_bytes);
+    
+    th0.join();
+
+    return 0; 
+} 
+
+void thread_recv_packets(unsigned int port, int recv_bytes) { 
+
+    printf("Printing Port from Thread %d\n", port); 
 
     int server_fd, sock;
     struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
-    char *finish = "Finish receiving.";
 
     // Creating socket file descriptor 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
@@ -50,7 +54,7 @@ void *thread_recv_packets(void* vargp)
 
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(t_info -> port);
+    address.sin_port = htons(port);
 
     // Forcefully attaching socket to the port 8080 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
@@ -74,22 +78,22 @@ void *thread_recv_packets(void* vargp)
 
     printf("Start receiving data.\n");
     ////////////////   Data transfer   ////////////////
-    char* recv_buf = (char*) malloc(RECV_BYTES);
+    char* recv_buf = (char*) malloc(recv_bytes);
 
-    clock_t start = clock();
+    auto start = std::chrono::high_resolution_clock::now();
 
     // Should wait until the server said all the data was sent correctly,
     // otherwise the sender may send packets yet the server did not receive.
 
     int total_recv_bytes = 0;
-    while (total_recv_bytes < RECV_BYTES) {
-        int recv_bytes_this_iter = (RECV_BYTES - total_recv_bytes) < 4096? (RECV_BYTES - total_recv_bytes) : 4096;
+    while (total_recv_bytes < recv_bytes) {
+        int recv_bytes_this_iter = (recv_bytes - total_recv_bytes) < RECV_PKG_SIZE? (recv_bytes - total_recv_bytes) : RECV_PKG_SIZE;
     	int recv_bytes = read(sock, recv_buf + total_recv_bytes, recv_bytes_this_iter);
-    	//int recv_bytes = read(sock, recv_buf + total_recv_bytes, RECV_BYTES - total_recv_bytes);
+    	//int recv_bytes = read(sock, recv_buf + total_recv_bytes, recv_bytes - total_recv_bytes);
         total_recv_bytes += recv_bytes;
         if (recv_bytes == -1) {
             printf("Receiving data UNSUCCESSFUL!\n");
-            return 0;
+            return;
         }
 #ifdef DEBUG
 	else {
@@ -98,33 +102,12 @@ void *thread_recv_packets(void* vargp)
 #endif
     }
 
-    if (total_recv_bytes != RECV_BYTES) {
+    if (total_recv_bytes != recv_bytes) {
         printf("Receiving error, receiving more bytes than a block\n");
     }
-    clock_t end = clock();
-//    float total_size = (float)LOOP_NUM * BATCH_NUM_PER_LOOP * SEND_BYTES;
-//    printf("Data sent. Packet number:%d\tPacket size:%d bytes\tTotal data:%fGB\n",
-//        LOOP_NUM * BATCH_NUM_PER_LOOP, SEND_BYTES, total_size / (1024 * 1024 * 1024));   
-//    float elapsed_time = (end-start) / (float)CLOCKS_PER_SEC;
-//    printf("\nConsumed time: %f seconds\n", elapsed_time);
-//    printf("Transfer Throughput: %f GB / sec\n", total_size / elapsed_time / 1024 / 1024 / 1024); 
 
-    return NULL; 
-} 
-
-int main(int argc, char const *argv[]) 
-{ 
-
-    pthread_t thread_id; 
-    printf("Before Thread\n"); 
-
-    struct Thread_info t_info_0;
-    t_info_0.port = PORT;
-
-    pthread_create(&thread_id, NULL, thread_recv_packets, (void*) &t_info_0); 
-    // pthread_create(&thread_id, NULL, thread_recv_packets, NULL); 
-    pthread_join(thread_id, NULL); 
-    printf("After Thread\n"); 
-
-    return 0; 
+    auto end = std::chrono::high_resolution_clock::now();
+    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
+    printf("durationUs:%f\n",durationUs);
+    printf("Transfer Throughput: %f GB / sec\n", recv_bytes / (durationUs / 1000.0 / 1000.0) / (1024.0 * 1024.0 * 1024.0)); 
 } 

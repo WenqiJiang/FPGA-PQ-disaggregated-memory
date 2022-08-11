@@ -242,20 +242,20 @@ void entire_accelerator_v2(
 #pragma HLS INTERFACE axis port = m_axis_tcp_tx_data
 #pragma HLS INTERFACE axis port = s_axis_tcp_tx_status
 
-// #pragma HLS INTERFACE s_axilite port=useConn bundle = control
-// #pragma HLS INTERFACE s_axilite port=basePortRx bundle = control
-// #pragma HLS INTERFACE s_axilite port=expectedRxByteCnt bundle = control
-// #pragma HLS INTERFACE s_axilite port=baseIpAddressTx bundle=control
-// #pragma HLS INTERFACE s_axilite port=basePortTx bundle = control
-// #pragma HLS INTERFACE s_axilite port=expectedTxPkgCnt bundle = control
-// #pragma HLS INTERFACE s_axilite port=pkgWordCountTx bundle = control
-// #pragma HLS INTERFACE s_axilite port = return bundle = control
+#pragma HLS INTERFACE s_axilite port=useConn // bundle = control
+#pragma HLS INTERFACE s_axilite port=basePortRx // bundle = control
+#pragma HLS INTERFACE s_axilite port=expectedRxByteCnt // bundle = control
+#pragma HLS INTERFACE s_axilite port=baseIpAddressTx // bundle=control
+#pragma HLS INTERFACE s_axilite port=basePortTx // bundle = control
+#pragma HLS INTERFACE s_axilite port=expectedTxPkgCnt // bundle = control
+#pragma HLS INTERFACE s_axilite port=pkgWordCountTx // bundle = control
+#pragma HLS INTERFACE s_axilite port = return bundle = // control
 
 // accelerator kernel 
 
-// #pragma HLS INTERFACE s_axilite port=query_num bundle = control
-// #pragma HLS INTERFACE s_axilite port=nlist bundle = control
-// #pragma HLS INTERFACE s_axilite port=nprobe bundle = control
+#pragma HLS INTERFACE s_axilite port=query_num // bundle = control
+#pragma HLS INTERFACE s_axilite port=nlist // bundle = control
+#pragma HLS INTERFACE s_axilite port=nprobe // bundle = control
 
 #pragma HLS INTERFACE m_axi port=meta_data_init offset=slave bundle=gmem3
 #pragma HLS INTERFACE m_axi port=PQ_codes_DRAM_0 offset=slave bundle=gmem5
@@ -283,7 +283,13 @@ void entire_accelerator_v2(
 
     // Wenqi-customized recv function, resolve deadlock in the case that
     //   input data rate >> FPGA query processing rate
-    recvDataSafe(expectedRxByteCnt, 
+    // recvDataSafe(expectedRxByteCnt, 
+    //     s_kernel_network_in,
+    //     s_axis_tcp_notification, 
+    //     m_axis_tcp_read_pkg, 
+    //     s_axis_tcp_rx_meta, 
+    //     s_axis_tcp_rx_data);
+    recvData(expectedRxByteCnt, 
         s_kernel_network_in,
         s_axis_tcp_notification, 
         m_axis_tcp_read_pkg, 
