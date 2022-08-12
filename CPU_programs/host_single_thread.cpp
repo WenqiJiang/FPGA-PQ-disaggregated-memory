@@ -1,5 +1,5 @@
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./host_single_thread 10.253.74.20 8881 5001
+// Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
@@ -24,7 +24,7 @@
 // #define SEND_PKG_SIZE 4096 // 1024 
 #define RECV_PKG_SIZE 4096 // 1024
 
-#define DEBUG
+// #define DEBUG
 
 
 template <typename T>
@@ -90,7 +90,9 @@ int main(int argc, char const *argv[])
         recv_port = strtol(argv[3], NULL, 10);
     } 
     
-    size_t query_num = 100;
+    std::string db_name = "SIFT1000M"; // SIFT100M
+
+    size_t query_num = 10000;
     size_t nlist = 32768;
     size_t nprobe = 32;
 
@@ -126,7 +128,12 @@ int main(int argc, char const *argv[])
 
     //////////     Data loading / computing Part     //////////
 
-    std::string data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT100M_IVF32768,PQ32";
+    std::string data_dir_prefix;
+    if (db_name == "SIFT100M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT100M_IVF32768,PQ32";
+    } else if (db_name == "SIFT1000M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT1000M_IVF32768,PQ32";
+    }
     std::string gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/bigann/gnd/";
 
     ///////////     get data size from disk     //////////
@@ -153,13 +160,23 @@ int main(int argc, char const *argv[])
     vector_quantizer_fstream.seekg(0, vector_quantizer_fstream.beg);
 
     // ground truth 
-    std::string raw_gt_vec_ID_suffix_dir = "idx_100M.ivecs";
+    std::string raw_gt_vec_ID_suffix_dir;
+    if (db_name == "SIFT100M") {
+        raw_gt_vec_ID_suffix_dir = "idx_100M.ivecs";
+    } else if (db_name == "SIFT1000M") {
+        raw_gt_vec_ID_suffix_dir = "idx_1000M.ivecs";
+    }
     std::string raw_gt_vec_ID_dir = dir_concat(gnd_dir, raw_gt_vec_ID_suffix_dir);
     std::ifstream raw_gt_vec_ID_fstream(
         raw_gt_vec_ID_dir,
         std::ios::in | std::ios::binary);
 
-    std::string raw_gt_dist_suffix_dir = "dis_100M.fvecs";
+    std::string raw_gt_dist_suffix_dir;
+    if (db_name == "SIFT100M") {
+        raw_gt_dist_suffix_dir = "dis_100M.fvecs";
+    } else if (db_name == "SIFT1000M") {
+        raw_gt_dist_suffix_dir = "dis_1000M.fvecs";
+    }
     std::string raw_gt_dist_dir = dir_concat(gnd_dir, raw_gt_dist_suffix_dir);
     std::ifstream raw_gt_dist_fstream(
         raw_gt_dist_dir,
@@ -297,14 +314,6 @@ int main(int argc, char const *argv[])
     double duration_LUT = (std::chrono::duration_cast<std::chrono::milliseconds>(end_LUT - start_LUT).count());
 
     std::cout << "Duration Select Cells to Scan: " << duration_LUT << " ms" << std::endl; 
-
-#ifdef DEBUG
-    int count_zero = 0;
-    for (int i = 0; i < send_bytes_per_query * query_num; i++) {
-        if (in_buf[i] == 0) { count_zero++; }
-    }
-    std::cout << "there are " << count_zero << " 0s in in_buf" << std::endl;
-#endif
 
     //////////     Networking Part     //////////
 
@@ -453,12 +462,11 @@ void thread_recv_packets(
 
     auto end = std::chrono::high_resolution_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
-#ifdef DEBUG
+
     std::cout << "Recv side Duration (us) = " << durationUs << std::endl;
     if (query_num > 1) {
         std::cout << "Recv side QPS () = " << (query_num - 1) / (durationUs / 1000.0 / 1000.0) << std::endl;
     } 
-#endif
 
     return; 
 } 
@@ -504,27 +512,15 @@ void thread_send_packets(
     printf("Start sending data.\n");
     ////////////////   Data transfer   ////////////////
 
-// #ifdef DEBUG
-//     char* buf = new char[send_bytes_per_query];
-// #endif 
-
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int query_id = 0; query_id < query_num; query_id++) {
 
         std::cout << "query_id " << query_id << std::endl;
-// #ifdef DEBUG
-//         memcpy(buf, &in_buf[query_id * send_bytes_per_query], send_bytes_per_query);
-// #endif 
-        // if (query_id >= 1) { 
-        //     std::cout << "Set send buffer to 0" << std::endl; 
-        //     memset(buf, 0, send_bytes_per_query); 
-        // }
         int total_sent_bytes = 0;
 
         while (total_sent_bytes < send_bytes_per_query) {
             int send_bytes_this_iter = (send_bytes_per_query - total_sent_bytes) < SEND_PKG_SIZE? (send_bytes_per_query - total_sent_bytes) : SEND_PKG_SIZE;
-            // int sent_bytes = send(sock, buf + total_sent_bytes, send_bytes_this_iter, 0);
             int sent_bytes = send(sock, &in_buf[query_id * send_bytes_per_query + total_sent_bytes], send_bytes_this_iter, 0);
             total_sent_bytes += sent_bytes;
             if (sent_bytes == -1) {
@@ -550,10 +546,9 @@ void thread_send_packets(
 
     auto end = std::chrono::high_resolution_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
-#ifdef DEBUG
+    
     std::cout << "Send side Duration (us) = " << durationUs << std::endl;
     std::cout << "Send side QPS () = " << query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
-#endif 
 
     return; 
 } 

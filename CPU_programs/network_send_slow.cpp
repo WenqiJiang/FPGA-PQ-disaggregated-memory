@@ -14,10 +14,10 @@
 #include <pthread.h> 
 
 //#define SEND_BYTES 1
-#define SEND_BYTES (1024 * 1024) // the number of bytes to be send
+#define SEND_BYTES (1024 * 128) // the number of bytes to be send
 // #define SEND_BYTES (17088 * 100) // the number of bytes to be send
 
-#define PORT 8888
+#define PORT 8883
 // #define PORT 5002
 
 #define DEBUG
@@ -38,6 +38,9 @@ void *thread_send_packets(void* vargp)
     struct sockaddr_in serv_addr; 
 
     char* send_buf = (char*) malloc(SEND_BYTES);
+    // for (int i = 0; i < SEND_BYTES; i++) {
+    //     send_buf[i] = i % 128;
+    // }
     //for (int i = 0; i < BLOCK_ENTRY_NUM; i++) {
     //    send_buf[i] = 1;
     //}

@@ -10,8 +10,10 @@
 #include <unistd.h>
 #include <chrono>
 #include <thread>
+#include <cassert>
+#include <iostream>
 
-#define RECV_PKG_SIZE 64 
+#define RECV_PKG_SIZE 4096 
 // #define RECV_PKG_SIZE 4096 
 
 #define DEBUG
@@ -20,9 +22,9 @@ void thread_recv_packets(unsigned int port, int recv_bytes);
 
 int main(int argc, char const *argv[]) 
 { 
-    int recv_bytes = 1024 * 1024; // the number of bytes to be received
+    int recv_bytes = 1024 * 128; // the number of bytes to be received
     // unsigned int port = 8880;
-    unsigned int port = 5001;
+    unsigned int port = 5003;
 
     std::thread th0(thread_recv_packets, port, recv_bytes);
     
@@ -110,4 +112,10 @@ void thread_recv_packets(unsigned int port, int recv_bytes) {
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
     printf("durationUs:%f\n",durationUs);
     printf("Transfer Throughput: %f GB / sec\n", recv_bytes / (durationUs / 1000.0 / 1000.0) / (1024.0 * 1024.0 * 1024.0)); 
+
+    // for (int i = 0; i < recv_bytes; i++) {
+    //     if(recv_buf[i] != i%128) {
+    //         std::cout << "i = " << i << " content = " << int(recv_buf[i]) << std::endl;
+    //     }
+    // }
 } 

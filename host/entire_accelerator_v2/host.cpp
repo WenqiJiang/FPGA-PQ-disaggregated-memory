@@ -145,7 +145,16 @@ int main(int argc, char **argv) {
 
     ///////////     Part 2. Load Data     //////////
     
-    std::string data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT100M_IVF32768,PQ32";
+    std::string db_name = "SIFT1000M"; // SIFT100M
+    std::cout << "DB name: " << db_name << std::endl;
+    
+    std::string data_dir_prefix;
+    if (db_name == "SIFT100M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT100M_IVF32768,PQ32";
+    }
+    else if (db_name == "SIFT1000M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT1000M_IVF32768,PQ32";
+    }
     // std::string gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/bigann/gnd/";
 
     ///////////     get data size from disk     //////////
@@ -279,7 +288,7 @@ int main(int argc, char **argv) {
     auto start_load = std::chrono::high_resolution_clock::now();
 
     // in init
-    size_t query_num = 100;
+    size_t query_num = 10000;
     size_t nlist = 32768;
     size_t nprobe = 32;
 
