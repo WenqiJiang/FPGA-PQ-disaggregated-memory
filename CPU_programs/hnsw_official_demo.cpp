@@ -1,3 +1,4 @@
+// originally named as searchKnnCloserFirst_test.cpp in examples folder in hnsw_eval repo (or official hnsw repo)
 // This is a test file for testing the interface
 //  >>> virtual std::vector<std::pair<dist_t, labeltype>>
 //  >>>    searchKnnCloserFirst(const void* query_data, size_t k) const;

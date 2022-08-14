@@ -2,7 +2,7 @@ CC = g++
 CLAGS=-Wall
 LINK = -lpthread
 
-all: network_send network_send_slow network_send_per_query network_recv query_send_thread result_recv_thread host_single_thread
+all: network_send network_send_slow network_send_per_query network_recv query_send_thread result_recv_thread host_single_thread hnswlib_save_load_index
 
 network_send: network_send.cpp
 	${CC} ${CLAGS} network_send.cpp ${LINK} -o network_send
@@ -24,6 +24,9 @@ result_recv_thread: result_recv_thread.cpp
 
 host_single_thread: host_single_thread.cpp
 	${CC} ${CLAGS} host_single_thread.cpp ${LINK} -o host_single_thread
+
+hnswlib_save_load_index: hnswlib_save_load_index.cpp
+	${CC} ${CLAGS} hnswlib_save_load_index.cpp ${LINK} -o hnswlib_save_load_index
 
 .PHONY: clean, cleanall
 
