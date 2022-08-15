@@ -1,7 +1,7 @@
-// host_single_thread: the complete implementation for single FPGA
+// host_single_thread_v1: the basic implementation
 //   2 thread, 1 for sending query, 1 for receiving results
-//   the cells to scan can either be selected using HNSW or brute-force scan
-//   the cells to scan is computed at query time
+//   compute all cell to scan before the query sending thread (by manual implementation of brute-force scan)
+
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
 // Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001
@@ -22,12 +22,11 @@
 #include <cassert>
 #include <algorithm>
 
-#include "./hnswlib/hnswlib.h"
-
 #define D 128
 #define TOPK 100
 
 #define SEND_PKG_SIZE 17088 // 1024 
+// #define SEND_PKG_SIZE 4096 // 1024 
 #define RECV_PKG_SIZE 4096 // 1024
 
 // #define DEBUG
@@ -59,9 +58,7 @@ std::string dir_concat(std::string dir1, std::string dir2) {
 }
 
 void thread_send_packets(
-    const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
-    float* query_vectors_ptr, float* vector_quantizer_ptr, 
-    hnswlib::AlgorithmInterface<float>* alg_hnswlib,
+    const char* IP_addr, unsigned int send_port, int query_num, int send_bytes_per_query, char* in_buf,
     int send_recv_query_gap, int* start_recv, int* finish_recv_query_id); 
 
 void thread_recv_packets(
@@ -98,13 +95,7 @@ int main(int argc, char const *argv[])
         recv_port = strtol(argv[3], NULL, 10);
     } 
     
-    std::string db_name = "SIFT100M"; // SIFT100M
-    // std::string db_name = "SIFT100M";
-    std::cout << "DB name: " << db_name << std::endl;
-    
-    std::string index_scan = "hnsw"; // hnsw or brute-force
-    // std::string index_scan = "brute-force"; // hnsw or brute-force
-    std::cout << "Index scan: " << index_scan << std::endl;
+    std::string db_name = "SIFT1000M"; // SIFT100M
 
     size_t query_num = 10000;
     size_t nlist = 32768;
@@ -116,6 +107,16 @@ int main(int argc, char const *argv[])
     int send_recv_query_gap = 5; 
 
     assert (nprobe <= nlist);
+
+    // in runtime (should from network) in 512-bit packet
+    size_t size_header = 1;
+    size_t size_cell_IDs = nprobe * 4 % 64 == 0? nprobe * 4 / 64: nprobe * 4 / 64 + 1;
+    size_t size_query_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
+    size_t size_center_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
+
+    size_t FPGA_input_bytes = query_num * 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
+    int send_bytes_per_query = 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
+    std::cout << "send_bytes_per_query: " << send_bytes_per_query << std::endl;
 
     // out
     // 128 is a random padding for network headers
@@ -187,7 +188,11 @@ int main(int argc, char const *argv[])
         std::ios::in | std::ios::binary);
 
     //////////     Allocate Memory     //////////
-    
+
+    // input data
+    char* in_buf = new char[FPGA_input_bytes];
+    memset(in_buf, 0, FPGA_input_bytes);
+
     // on host side, used to Select Cells to Scan 
     std::vector<float, aligned_allocator<float>> query_vectors(query_vectors_size / sizeof(float));
     std::vector<float, aligned_allocator<float>> vector_quantizer(vector_quantizer_size / sizeof(float));
@@ -259,48 +264,61 @@ int main(int argc, char const *argv[])
         gt_dist[i] = raw_gt_dist[i * 1001 + 1];
     }
 
-    // HNSWlib index
-    hnswlib::AlgorithmInterface<float>* alg_hnswlib;
-    hnswlib::L2Space space(D);
-    if (index_scan == "brute_force") {
-        std::string brute_force_index_dir = dir_concat(data_dir_prefix, "hnswlib_brute_force_index.bin");
-        std::ifstream f_hnswlib(brute_force_index_dir);
-        bool hnswlib_index_exists = f_hnswlib.good();
-        if (hnswlib_index_exists) {
-            std::cout << "brute_force Index exists, loading index..." << std::endl;
-            alg_hnswlib = new hnswlib::BruteforceSearch<float>(&space, brute_force_index_dir);
-        }
-        else {
-            std::cout << "brute_force Index does not exist, creating new index..." << std::endl;
-            alg_hnswlib = new hnswlib::BruteforceSearch<float>(&space, nlist);
-            std::cout << "Adding data..." << std::endl;
-            for (size_t i = 0; i < nlist; ++i) {
-                alg_hnswlib->addPoint(vector_quantizer.data() + D * i, i);
+    //////////     Select Cells to Scan     //////////
+    std::cout << "selecting cells to scan..." << std::endl;
+
+    auto start_LUT = std::chrono::high_resolution_clock::now();
+
+    std::vector<std::pair <float, int>> dist_array(nlist); // (dist, cell_ID)
+
+    // select cells to scan
+    for (size_t query_id = 0; query_id < query_num; query_id++) {
+
+        for (size_t nlist_id = 0; nlist_id < nlist; nlist_id ++) {
+
+            float dist = 0;
+            for (size_t d = 0; d < D; d++) {
+                dist += 
+                    (query_vectors[query_id * D + d] - vector_quantizer[nlist_id * D + d]) *
+                    (query_vectors[query_id * D + d] - vector_quantizer[nlist_id * D + d]);
             }
-            alg_hnswlib->saveIndex(brute_force_index_dir);
+            dist_array[nlist_id] = std::make_pair(dist, nlist_id);
+            // std::cout << "dist: " << dist << " cell ID: " << nlist_id << "\n";
         }
-    } else if (index_scan == "hnsw") {
-        std::string hnsw_index_dir = dir_concat(data_dir_prefix, "hnswlib_hnsw_index.bin");
-        std::ifstream f_hnswlib(hnsw_index_dir);
-        bool hnswlib_index_exists = f_hnswlib.good();
-        if (hnswlib_index_exists) {
-            std::cout << "HNSW Index exists, loading index..." << std::endl;
-            alg_hnswlib = new hnswlib::HierarchicalNSW<float>(&space, hnsw_index_dir);
-        }
-        else {
-            std::cout << "HNSW Index does not exist, creating new index..." << std::endl;
-            size_t ef_construction = 128;
-            alg_hnswlib = new hnswlib::HierarchicalNSW<float>(&space, nlist, ef_construction);
-            std::cout << "Adding data..." << std::endl;
-            for (size_t i = 0; i < nlist; ++i) {
-                alg_hnswlib->addPoint(vector_quantizer.data() + D * i, i);
-            }
-            alg_hnswlib->saveIndex(hnsw_index_dir);
-        }
-    } else {
-        std::cout << "index option does not exists, either brute_force or hnsw" << std::endl;
-        exit(1);
+        
+        size_t start_addr_FPGA_input_per_query = query_id * send_bytes_per_query;
+        size_t start_addr_FPGA_input_cell_ID = start_addr_FPGA_input_per_query + size_header * 64;
+        size_t start_addr_FPGA_input_query_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs) * 64;
+        size_t start_addr_FPGA_input_center_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs + size_query_vector) * 64;
+
+        // select cells
+        std::nth_element(dist_array.begin(), dist_array.begin() + nprobe, dist_array.end()); // get nprobe smallest
+        std::sort(dist_array.begin(), dist_array.begin() + nprobe); // sort first nprobe
+            
+        // write cell ID
+        for (size_t n = 0; n < nprobe; n++) {
+            int cell_ID = dist_array[n].second;
+            memcpy(&in_buf[start_addr_FPGA_input_cell_ID + n * sizeof(int)], &cell_ID, sizeof(int));
+#ifdef DEBUG
+            std::cout << "dist: " << dist_array[n].first << " cell ID: " << dist_array[n].second << "\n";
+#endif
+        } 
+
+        // write query vector
+	    memcpy(&in_buf[start_addr_FPGA_input_query_vector], &query_vectors[query_id * D], D * sizeof(float));
+
+        // write center vectors      
+        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
+
+            int cell_ID = dist_array[nprobe_id].second;
+	        memcpy(&in_buf[start_addr_FPGA_input_center_vector + nprobe_id * D * sizeof(float)], 
+                   &vector_quantizer[cell_ID * D], D * sizeof(float));
+        }        
     }
+    auto end_LUT = std::chrono::high_resolution_clock::now();
+    double duration_LUT = (std::chrono::duration_cast<std::chrono::milliseconds>(end_LUT - start_LUT).count());
+
+    std::cout << "Duration Select Cells to Scan: " << duration_LUT << " ms" << std::endl; 
 
     //////////     Networking Part     //////////
 
@@ -313,8 +331,7 @@ int main(int argc, char const *argv[])
         &start_recv, &finish_recv_query_id);
 
     std::thread t_send(
-        thread_send_packets, IP_addr, send_port, query_num, nprobe,
-        query_vectors.data(), vector_quantizer.data(), alg_hnswlib,
+        thread_send_packets, IP_addr, send_port, query_num, send_bytes_per_query, in_buf,
         send_recv_query_gap, &start_recv, &finish_recv_query_id);
 
     t_recv.join();
@@ -460,23 +477,9 @@ void thread_recv_packets(
 } 
 
 void thread_send_packets(
-    const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
-    float* query_vectors_ptr, float* vector_quantizer_ptr, 
-    hnswlib::AlgorithmInterface<float>* alg_hnswlib,
+    const char* IP_addr, unsigned int send_port, int query_num, int send_bytes_per_query, char* in_buf,
     int send_recv_query_gap, int* start_recv, int* finish_recv_query_id) { 
        
-    // in runtime (should from network) in 512-bit packet
-    size_t size_header = 1;
-    size_t size_cell_IDs = nprobe * 4 % 64 == 0? nprobe * 4 / 64: nprobe * 4 / 64 + 1;
-    size_t size_query_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
-    size_t size_center_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
-
-    size_t FPGA_input_bytes = query_num * 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
-    int send_bytes_per_query = 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
-    std::cout << "send_bytes_per_query: " << send_bytes_per_query << std::endl;
-    std::vector<char ,aligned_allocator<char >> FPGA_input(FPGA_input_bytes);
-
-    // wait for ready
     volatile int dummy_count = 0;
     while(!(*start_recv)) { 
         dummy_count++;
@@ -512,59 +515,18 @@ void thread_send_packets(
     } 
 
     printf("Start sending data.\n");
-    ////////////////   Data transfer + Select Cells   ////////////////
-
-
-    std::vector<std::pair <float, int>> dist_array(nprobe); // (dist, cell_ID)
+    ////////////////   Data transfer   ////////////////
 
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int query_id = 0; query_id < query_num; query_id++) {
 
         std::cout << "query_id " << query_id << std::endl;
-
-        // select cells to scan
-        size_t start_addr_FPGA_input_per_query = query_id * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector) * 64;
-        size_t start_addr_FPGA_input_cell_ID = start_addr_FPGA_input_per_query + size_header * 64;
-        size_t start_addr_FPGA_input_query_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs) * 64;
-        size_t start_addr_FPGA_input_center_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs + size_query_vector) * 64;
-
-        void* p = query_vectors_ptr + query_id * D;
-        // searchKNN return type: std::priority_queue<std::pair<dist_t, labeltype >>
-        auto gd = alg_hnswlib->searchKnn(p, nprobe);
-        assert(gd.size() == nprobe);
-        int cnt = 0;
-        while (!gd.empty()) {
-            dist_array[cnt] = std::make_pair(gd.top().first, int(gd.top().second));
-            gd.pop();
-            cnt++;
-        }
-
-        // write cell ID
-        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
-            memcpy(&FPGA_input[start_addr_FPGA_input_cell_ID + nprobe_id * sizeof(int)], &dist_array[nprobe_id].second, sizeof(int));
-#ifdef DEBUG
-            std::cout << "dist: " << dist_array[n].first << " cell ID: " << dist_array[nprobe_id].second << "\n";
-#endif
-        } 
-
-        // write query vector
-	    memcpy(&FPGA_input[start_addr_FPGA_input_query_vector], query_vectors_ptr + query_id * D, D * sizeof(float));
-
-        // write center vectors      
-        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
-
-            size_t cell_ID = dist_array[nprobe_id].second;
-	        memcpy(&FPGA_input[start_addr_FPGA_input_center_vector + nprobe_id * D * sizeof(float)], 
-                   vector_quantizer_ptr + cell_ID * D, D * sizeof(float));
-        }        
-
-        // send data
         int total_sent_bytes = 0;
 
         while (total_sent_bytes < send_bytes_per_query) {
             int send_bytes_this_iter = (send_bytes_per_query - total_sent_bytes) < SEND_PKG_SIZE? (send_bytes_per_query - total_sent_bytes) : SEND_PKG_SIZE;
-            int sent_bytes = send(sock, &FPGA_input[query_id * send_bytes_per_query + total_sent_bytes], send_bytes_this_iter, 0);
+            int sent_bytes = send(sock, &in_buf[query_id * send_bytes_per_query + total_sent_bytes], send_bytes_this_iter, 0);
             total_sent_bytes += sent_bytes;
             if (sent_bytes == -1) {
                 printf("Sending data UNSUCCESSFUL!\n");

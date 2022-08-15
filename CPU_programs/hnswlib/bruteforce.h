@@ -108,6 +108,18 @@ namespace hnswlib {
                 }
 
             }
+            // Wenqi's implementation, equivalently slow...
+            // std::vector<std::pair<dist_t, labeltype>> results(cur_element_count); 
+            // for (int i = k; i < cur_element_count; i++) {
+            //     dist_t dist = fstdistfunc_(query_data, data_ + size_per_element_ * i, dist_func_param_);
+            //     results[i] = std::pair<dist_t, labeltype>(dist, *((labeltype *) (data_ + size_per_element_ * i +
+            //                                                                             data_size_)));
+            // }
+            
+            // std::nth_element(results.begin(), results.begin() + k, results.end()); // get nprobe smallest
+            // std::sort(results.begin(), results.begin() + k); // sort first nprobe
+            // std::priority_queue<std::pair<dist_t, labeltype >> topResults(results.begin(), results.begin() + k);
+
             return topResults;
         };
 

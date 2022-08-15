@@ -27,7 +27,7 @@ std::string dir_concat(std::string dir1, std::string dir2) {
 
 void test() {
 
-    std::string db_name = "SIFT1000M";
+    std::string db_name = "SIFT100M";
     
 
     int D = 128;
@@ -117,11 +117,11 @@ void test() {
     hnswlib::AlgorithmInterface<float>* alg_brute_force;
     if (file_exists(brute_force_index_dir)) {
         std::cout << "brute_force Index exists, loading index..." << std::endl;
-        alg_brute_force = new hnswlib::HierarchicalNSW<float>(&space, brute_force_index_dir);
+        alg_brute_force = new hnswlib::BruteforceSearch<float>(&space, brute_force_index_dir);
     }
     else {
         std::cout << "brute_force Index does not exist, creating new index..." << std::endl;
-        alg_brute_force = new hnswlib::HierarchicalNSW<float>(&space, nlist);
+        alg_brute_force = new hnswlib::BruteforceSearch<float>(&space, nlist);
         std::cout << "Adding data..." << std::endl;
         for (size_t i = 0; i < nlist; ++i) {
             alg_brute_force->addPoint(vector_quantizer.data() + D * i, i);

@@ -24,7 +24,7 @@ namespace hnswlib {
             loadIndex(location, s, max_elements);
         }
 
-        HierarchicalNSW(SpaceInterface<dist_t> *s, size_t max_elements, size_t M = 16, size_t ef_construction = 200, size_t random_seed = 100) :
+        HierarchicalNSW(SpaceInterface<dist_t> *s, size_t max_elements, size_t M_hnswlib = 16, size_t ef_construction = 200, size_t random_seed = 100) :
                 link_list_locks_(max_elements), link_list_update_locks_(max_update_element_locks), element_levels_(max_elements) {
             max_elements_ = max_elements;
 
@@ -32,7 +32,7 @@ namespace hnswlib {
             data_size_ = s->get_data_size();
             fstdistfunc_ = s->get_dist_func();
             dist_func_param_ = s->get_dist_func_param();
-            M_ = M;
+            M_ = M_hnswlib;
             maxM_ = M_;
             maxM0_ = M_ * 2;
             ef_construction_ = std::max(ef_construction,M_);
@@ -327,8 +327,8 @@ namespace hnswlib {
 
         void getNeighborsByHeuristic2(
                 std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst> &top_candidates,
-        const size_t M) {
-            if (top_candidates.size() < M) {
+        const size_t M_hnswlib) {
+            if (top_candidates.size() < M_hnswlib) {
                 return;
             }
 
@@ -340,7 +340,7 @@ namespace hnswlib {
             }
 
             while (queue_closest.size()) {
-                if (return_list.size() >= M)
+                if (return_list.size() >= M_hnswlib)
                     break;
                 std::pair<dist_t, tableint> curent_pair = queue_closest.top();
                 dist_t dist_to_query = -curent_pair.first;
