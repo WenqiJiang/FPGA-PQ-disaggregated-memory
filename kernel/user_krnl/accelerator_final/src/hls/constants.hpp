@@ -10,7 +10,7 @@
 #define D 128
 #define M 32
 #define LUT_ENTRY_NUM 256
-#define ADC_DOUBLE_BUF_ENABLE 1 // 0 = disable, 1 = enable
+#define ADC_DOUBLE_BUF_ENABLE 0 // 0 = disable, 1 = enable (might result in P&R failure)
 
 // Derived & Fixed numbers
 #define NLIST_MAX 262144 // 256K centroids at max

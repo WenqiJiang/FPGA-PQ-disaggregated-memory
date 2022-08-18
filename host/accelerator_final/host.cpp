@@ -30,9 +30,9 @@ int main(int argc, char **argv) {
 
     //////////     Part 1. Parse the arguments & Program the FPGA     //////////
 
-    if (argc != 6) {
+    if (argc != 7) {
         // Rx bytes = Tx byte (forwarding the data)
-        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5> <nprobe 6>" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -88,6 +88,10 @@ int main(int argc, char **argv) {
         basePortTx = strtol(argv[5], NULL, 10);
     }
 
+    size_t nprobe = 1;
+    {
+        nprobe = strtol(argv[6], NULL, 10);
+    }
 
     auto size = DATA_SIZE;
     
@@ -145,7 +149,7 @@ int main(int argc, char **argv) {
 
     ///////////     Part 2. Load Data     //////////
     
-    std::string db_name = "SIFT100M"; // SIFT100M
+    std::string db_name = "SIFT1000M"; // SIFT100M
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string data_dir_prefix;
@@ -290,7 +294,6 @@ int main(int argc, char **argv) {
     // in init
     size_t query_num = 10000;
     size_t nlist = 32768;
-    size_t nprobe = 32;
 
     assert (nprobe <= nlist);
 

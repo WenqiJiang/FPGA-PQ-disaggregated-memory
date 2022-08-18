@@ -118,9 +118,25 @@ Don't use consecutive ports for send/recv, which might lead to problems.
 
 **NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001), which might not be available for awhile; the CPU->FPGA side can remain the same**
 
+FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
+
 ```
 # For u250-04 from/to alveo-build-01
-./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8888 10.253.74.5 5001
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8888 10.253.74.5 5008
+```
+
+
+#### accelerator_final
+
+<host_exe> <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5> <nprobe 6>
+
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001), which might not be available for awhile; the CPU->FPGA side can remain the same**
+
+FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
+
+```
+# For u250-04 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8888 10.253.74.5 5008 32
 ```
 
 

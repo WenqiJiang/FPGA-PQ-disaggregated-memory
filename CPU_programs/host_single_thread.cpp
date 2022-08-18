@@ -4,7 +4,8 @@
 //   the cells to scan is computed at query time
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001
+// Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001 1 32
+//  "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <Tx send_port> <Rx recv_port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
@@ -62,18 +63,20 @@ void thread_send_packets(
     const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
     float* query_vectors_ptr, float* vector_quantizer_ptr, 
     hnswlib::AlgorithmInterface<float>* alg_hnswlib,
-    int send_recv_query_gap, int* start_recv, int* finish_recv_query_id); 
+    int send_recv_query_gap, int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_start_time_ptr); 
 
 void thread_recv_packets(
     unsigned int send_port, int query_num, int recv_bytes_per_query, char* out_buf,
-    int* start_recv, int* finish_recv_query_id); 
+    int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_finish_time_ptr); 
     
 
 int main(int argc, char const *argv[]) 
 { 
     //////////     Parameter Init     //////////
     
-    std::cout << "Usage: " << argv[0] << " <Tx IP_addr> <Tx send_port> <Rx recv_port>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <Tx send_port> <Rx recv_port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>" << std::endl;
 
     const char* IP_addr;
     if (argc >= 2)
@@ -98,8 +101,23 @@ int main(int argc, char const *argv[])
         recv_port = strtol(argv[3], NULL, 10);
     } 
     
-    std::string db_name = "SIFT100M"; // SIFT100M
-    // std::string db_name = "SIFT100M";
+    // how many queries are allow to send ahead of receiving results
+    // e.g., when send_recv_query_gap = 1, query 2 can be sent without receiving result 1
+    // e.g., when send_recv_query_gap = 0, result 1 must be received before query 2 can be sent, 
+    //          but might lead to a deadlock
+    int send_recv_query_gap = 1;
+    if (argc >= 5)
+    {
+        send_recv_query_gap = strtol(argv[4], NULL, 10);
+    } 
+
+    size_t nprobe = 1;
+    if (argc >= 6)
+    {
+        nprobe = strtol(argv[5], NULL, 10);
+    } 
+
+    std::string db_name = "SIFT1000M"; // SIFT100M or SIFT1000M
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string index_scan = "hnsw"; // hnsw or brute-force
@@ -108,12 +126,6 @@ int main(int argc, char const *argv[])
 
     size_t query_num = 10000;
     size_t nlist = 32768;
-    size_t nprobe = 32;
-
-    // how many queries are allow to send ahead of receiving results
-    // e.g., when send_recv_query_gap = 1, query 2 can be sent without receiving result 1
-    // e.g., when send_recv_query_gap = 1, result 1 must be received before query 2 can be sent
-    int send_recv_query_gap = 5; 
 
     assert (nprobe <= nlist);
 
@@ -308,22 +320,59 @@ int main(int argc, char const *argv[])
     int start_recv = 0; 
     int finish_recv_query_id = -1;
 
-    std::thread t_recv(
-        thread_recv_packets, recv_port, query_num, recv_bytes_per_query, out_buf,
-        &start_recv, &finish_recv_query_id);
+    // profiler
+    std::vector<std::chrono::system_clock::time_point> query_start_time(query_num);
+    std::vector<std::chrono::system_clock::time_point> query_finish_time(query_num);
 
     std::thread t_send(
         thread_send_packets, IP_addr, send_port, query_num, nprobe,
         query_vectors.data(), vector_quantizer.data(), alg_hnswlib,
-        send_recv_query_gap, &start_recv, &finish_recv_query_id);
+        send_recv_query_gap, &start_recv, &finish_recv_query_id,
+        query_start_time.data());
 
-    t_recv.join();
+    std::thread t_recv(
+        thread_recv_packets, recv_port, query_num, recv_bytes_per_query, out_buf,
+        &start_recv, &finish_recv_query_id, query_finish_time.data());
+
     t_send.join();
+    t_recv.join();
+
+    //////////     Performance evaluation    //////////
+
+    // TCP has a slow start, thus the performance of the first 1000 queries are not counted
+    int start_query_id = int(query_num * 0.1);
+    std::cout << "Calculating performance skipping the first 10% of query due to the slow "
+        "start of TCP/IP..." << std::endl; 
+
+    // calculate QPS
+    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(
+            query_finish_time[query_num - 1] - query_start_time[start_query_id]).count());
+    std::cout << "Overall QPS = " << query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
+
+
+    std::vector<double> durationUs_per_query(query_num - start_query_id);
+    for (int i = start_query_id; i < query_num; i++) {
+        double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(
+            query_finish_time[i] - query_start_time[i]).count());
+        durationUs_per_query[i - start_query_id] = durationUs;
+#ifdef DEBUG
+        std::cout << "query " << i << " duration (us) = " durationUs << std::endl;
+#endif
+    }
+    std::sort(durationUs_per_query.begin(), durationUs_per_query.end());
+    std::cout << "Median latency (us) = " << durationUs_per_query[int(durationUs_per_query.size() * 0.5)] << std::endl;
+    std::cout << "95% tail latency (us) = " << durationUs_per_query[int(durationUs_per_query.size() * 0.95)] << std::endl;
+    std::cout << "Worst latency (us) = " << durationUs_per_query[durationUs_per_query.size() - 1] << std::endl;
 
     //////////     Recall evaluation    //////////
     std::cout << "Comparing Results..." << std::endl;
-    int count = 0;
-    int match_count = 0;
+    
+    int match_count_R1_at_1 = 0;
+    int match_count_R1_at_10 = 0;
+    int match_count_R1_at_100 = 0;
+    int match_count_R_at_1 = 0;
+    int match_count_R_at_10 = 0;
+    int match_count_R_at_100 = 0;
 
     for (int query_id = 0; query_id < query_num; query_id++) {
 
@@ -331,8 +380,10 @@ int main(int argc, char const *argv[])
         std::cout << "query ID: " << query_id << std::endl;
 #endif
 
+
         std::vector<long> hw_result_vec_ID_partial(TOPK, 0);
         std::vector<float> hw_result_dist_partial(TOPK, 0);
+        std::vector<std::pair<float, int>> hw_result_pair(TOPK);
 
         int start_result_vec_ID_addr = (query_id * size_results + 1) * 64;
         int start_result_dist_addr = (query_id * size_results + 1 + size_results_vec_ID) * 64;
@@ -340,24 +391,82 @@ int main(int argc, char const *argv[])
         // Load data
         memcpy(&hw_result_vec_ID_partial[0], &out_buf[start_result_vec_ID_addr], 8 * TOPK);
         memcpy(&hw_result_dist_partial[0], &out_buf[start_result_dist_addr], 4 * TOPK);
+        for (int k = 0; k < TOPK; k++) {
+            hw_result_pair[k] = std::make_pair(hw_result_dist_partial[k], hw_result_vec_ID_partial[k]);
+        }
+        std::sort(hw_result_pair.begin(), hw_result_pair.end());
+        for (int k = 0; k < TOPK; k++) {
+            hw_result_dist_partial[k] = hw_result_pair[k].first;
+            hw_result_vec_ID_partial[k] = hw_result_pair[k].second;
+        }
         
-        // Check correctness
-        count++;
-        // std::cout << "query id" << query_id << std::endl;
+
+        int start_addr_gt = query_id * 1001 + 1;
+
+        // R1@K
+        for (int k = 0; k < 1; k++) {
+            if (hw_result_vec_ID_partial[k] == raw_gt_vec_ID[start_addr_gt]) {
+                match_count_R1_at_1++;
+                break;
+            }
+        } 
+        for (int k = 0; k < 10; k++) {
+            if (hw_result_vec_ID_partial[k] == raw_gt_vec_ID[start_addr_gt]) {
+                match_count_R1_at_10++;
+                break;
+            }
+        } 
         for (int k = 0; k < TOPK; k++) {
 #ifdef DEBUG
             // std::cout << "hw: " << hw_result_vec_ID_partial[k] << " gt: " << gt_vec_ID[query_id] << 
             //     "hw dist: " << hw_result_dist_partial[k] << " gt dist: " << gt_dist[query_id] << std::endl;
 #endif 
-            if (hw_result_vec_ID_partial[k] == gt_vec_ID[query_id]) {
-                match_count++;
+            if (hw_result_vec_ID_partial[k] == raw_gt_vec_ID[start_addr_gt]) {
+                match_count_R1_at_100++;
                 break;
             }
         } 
-    }
-    float recall = ((float) match_count / (float) count);
-    printf("\n=====  Recall: %.8f  =====\n", recall);
 
+        // R@K
+        std::unordered_set<size_t> gt_set;
+        for (int k = 0; k < 1; k++) {
+            gt_set.insert(raw_gt_vec_ID[start_addr_gt + k]);
+        }
+        for (int k = 0; k < 1; k++) {
+            // count actually means contain here...
+            // https://stackoverflow.com/questions/42532550/why-does-stdset-not-have-a-contains-member-function
+            if (gt_set.count(hw_result_vec_ID_partial[k])) { 
+                match_count_R_at_1++;
+            }
+        }
+        for (int k = 0; k < 10; k++) {
+            gt_set.insert(raw_gt_vec_ID[start_addr_gt + k]);
+        }
+        for (int k = 0; k < 10; k++) {
+            // count actually means contain here...
+            // https://stackoverflow.com/questions/42532550/why-does-stdset-not-have-a-contains-member-function
+            if (gt_set.count(hw_result_vec_ID_partial[k])) { 
+                match_count_R_at_10++;
+            }
+        }
+        for (int k = 0; k < 100; k++) {
+            gt_set.insert(raw_gt_vec_ID[start_addr_gt + k]);
+        }
+        for (int k = 0; k < 100; k++) {
+            // count actually means contain here...
+            // https://stackoverflow.com/questions/42532550/why-does-stdset-not-have-a-contains-member-function
+            if (gt_set.count(hw_result_vec_ID_partial[k])) { 
+                match_count_R_at_100++;
+            }
+        }
+    }
+
+    std::cout << "R1@1: " << float(match_count_R1_at_1) / query_num << std::endl;
+    std::cout << "R1@10: " << float(match_count_R1_at_10) / query_num << std::endl;
+    std::cout << "R1@100: " << float(match_count_R1_at_100) / query_num << std::endl;
+    std::cout << "R@1: " << float(match_count_R_at_1) / (query_num * 1) << std::endl;
+    std::cout << "R@10: " << float(match_count_R_at_10) / (query_num * 10) << std::endl;
+    std::cout << "R@100: " << float(match_count_R_at_100) / (query_num * 100) << std::endl;
 
     return 0; 
 } 
@@ -365,7 +474,8 @@ int main(int argc, char const *argv[])
 
 void thread_recv_packets(
     unsigned int recv_port, int query_num, int recv_bytes_per_query, char* out_buf,
-    int* start_recv, int* finish_recv_query_id) { 
+    int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_finish_time_ptr) { 
 
     printf("Printing recv_port from Thread %d\n", recv_port); 
 
@@ -418,43 +528,53 @@ void thread_recv_packets(
     // Should wait until the server said all the data was sent correctly,
     // otherwise the sender may send packets yet the server did not receive.
 
-    auto start = std::chrono::high_resolution_clock::now(); // reset after recving the first query
+    std::chrono::system_clock::time_point start = std::chrono::system_clock::now(); // reset after recving the first query
 
     for (int query_id = 0; query_id < query_num; query_id++) {
 
+        std::cout << "recv query_id " << query_id << std::endl;
         int total_recv_bytes = 0;
         while (total_recv_bytes < recv_bytes_per_query) {
             int recv_bytes_this_iter = (recv_bytes_per_query - total_recv_bytes) < RECV_PKG_SIZE? (recv_bytes_per_query - total_recv_bytes) : RECV_PKG_SIZE;
             int recv_bytes = read(sock, out_buf + query_id * recv_bytes_per_query + total_recv_bytes, recv_bytes_this_iter);
             total_recv_bytes += recv_bytes;
+            
             if (recv_bytes == -1) {
                 printf("Receiving data UNSUCCESSFUL!\n");
                 return;
             }
 #ifdef DEBUG
-        else {
-            std::cout << "query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
-        }
+            else {
+                std::cout << "query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
+            }
 #endif
+            if (recv_bytes > 0) {
+                // set shared register as soon as the first packet of the results is received
+                *finish_recv_query_id = query_id; 
+#ifdef DEBUG
+                std::cout << "set finish_recv_query_id: " << query_id  << std::endl;
+#endif
+            }
         }
 
         if (total_recv_bytes != recv_bytes_per_query) {
             printf("Receiving error, receiving more bytes than a block\n");
         }
-        *finish_recv_query_id = query_id; // set shared register
         if (query_id == 0) {
             // start counting when the first recv finished
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::system_clock::now();
         }
+        *(query_finish_time_ptr + query_id) = std::chrono::system_clock::now();
     }
 
-    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
 
     std::cout << "Recv side Duration (us) = " << durationUs << std::endl;
     if (query_num > 1) {
         std::cout << "Recv side QPS () = " << (query_num - 1) / (durationUs / 1000.0 / 1000.0) << std::endl;
     } 
+    std::cout << "Recv side Finished." << std::endl;
 
     return; 
 } 
@@ -463,7 +583,8 @@ void thread_send_packets(
     const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
     float* query_vectors_ptr, float* vector_quantizer_ptr, 
     hnswlib::AlgorithmInterface<float>* alg_hnswlib,
-    int send_recv_query_gap, int* start_recv, int* finish_recv_query_id) { 
+    int send_recv_query_gap, int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_start_time_ptr) { 
        
     // in runtime (should from network) in 512-bit packet
     size_t size_header = 1;
@@ -517,11 +638,13 @@ void thread_send_packets(
 
     std::vector<std::pair <float, int>> dist_array(nprobe); // (dist, cell_ID)
 
-    auto start = std::chrono::high_resolution_clock::now();
+    std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
 
     for (int query_id = 0; query_id < query_num; query_id++) {
 
-        std::cout << "query_id " << query_id << std::endl;
+        std::cout << "send query_id " << query_id << std::endl;
+
+        *(query_start_time_ptr + query_id) = std::chrono::system_clock::now();
 
         // select cells to scan
         size_t start_addr_FPGA_input_per_query = query_id * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector) * 64;
@@ -544,7 +667,7 @@ void thread_send_packets(
         for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
             memcpy(&FPGA_input[start_addr_FPGA_input_cell_ID + nprobe_id * sizeof(int)], &dist_array[nprobe_id].second, sizeof(int));
 #ifdef DEBUG
-            std::cout << "dist: " << dist_array[n].first << " cell ID: " << dist_array[nprobe_id].second << "\n";
+            std::cout << "dist: " << dist_array[nprobe_id].first << " cell ID: " << dist_array[nprobe_id].second << "\n";
 #endif
         } 
 
@@ -582,16 +705,18 @@ void thread_send_packets(
         }
 
         volatile int dummy_count = 0;
-        while((*finish_recv_query_id) < query_id - send_recv_query_gap) {  ///// Wenqi: send 5 queries in advance
+        ///// Wenqi: send several queries in advance
+        while((*finish_recv_query_id) < query_id - send_recv_query_gap) {  
             dummy_count++;
         }
     }
 
-    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
     
     std::cout << "Send side Duration (us) = " << durationUs << std::endl;
     std::cout << "Send side QPS () = " << query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
 
+    std::cout << "Send side finished." << std::endl;
     return; 
 } 
