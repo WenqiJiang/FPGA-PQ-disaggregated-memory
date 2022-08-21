@@ -125,6 +125,9 @@ void network_output_processing(
     ap_uint<64> vec_ID_buffer [size_results_vec_ID * (512 / 64)] = { 0 };
     float dist_buffer[size_results_dist * (512 / 32)] = { 0 };
 
+    const int after_pad_size = 2048;
+    const int pad_size = after_pad_size - 1 - size_results_vec_ID - size_results_dist;
+
     // only write the last iteration
     for (int i = 0; i < query_num; i++) {
 #pragma HLS pipeline II=1
@@ -167,12 +170,18 @@ void network_output_processing(
             }
             s_kernel_network_out.write(pkt);
         }
+
+        // send pad
+        for (int j = 0; j < pad_size; j++) {
+            ap_uint<512> pkt = 0;
+            s_kernel_network_out.write(pkt);
+        }
     } 
 }
 
 
 extern "C" {
-void entire_accelerator_v2(
+void accelerator_final_pad(
      // Internal Stream
      hls::stream<pkt512>& s_axis_udp_rx, 
      hls::stream<pkt512>& m_axis_udp_tx, 
@@ -453,6 +462,8 @@ void entire_accelerator_v2(
 
     for (int s = 0; s < ADC_PE_NUM; s++) {
 #pragma HLS unroll
+
+#if ADC_DOUBLE_BUF_ENABLE == 0
         PQ_lookup_computation(
             query_num, 
             nprobe,
@@ -463,6 +474,18 @@ void entire_accelerator_v2(
             // output streams
             s_distance_LUT[s + 1],
             s_PQ_result[s]);
+#elif ADC_DOUBLE_BUF_ENABLE == 1
+        PQ_lookup_computation_double_buffer(
+            query_num, 
+            nprobe,
+            // input streams
+            s_distance_LUT[s],
+            s_PQ_codes[s],
+            s_scanned_entries_every_cell_ADC[s],
+            // output streams
+            s_distance_LUT[s + 1],
+            s_PQ_result[s]);
+#endif
     }
 
     dummy_distance_LUT_consumer(

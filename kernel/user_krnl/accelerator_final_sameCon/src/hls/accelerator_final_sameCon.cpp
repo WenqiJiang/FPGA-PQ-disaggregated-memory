@@ -172,7 +172,7 @@ void network_output_processing(
 
 
 extern "C" {
-void entire_accelerator_v2(
+void accelerator_final_sameCon(
      // Internal Stream
      hls::stream<pkt512>& s_axis_udp_rx, 
      hls::stream<pkt512>& m_axis_udp_tx, 
@@ -197,8 +197,6 @@ void entire_accelerator_v2(
      int basePortRx, 
      ap_uint<64> expectedRxByteCnt, // for input & output
      // Tx
-     int baseIpAddressTx,
-     int basePortTx, 
      ap_uint<64> expectedTxPkgCnt,
      int pkgWordCountTx, // number of 64-byte words per packet, e.g, 16 or 22
 
@@ -245,8 +243,6 @@ void entire_accelerator_v2(
 #pragma HLS INTERFACE s_axilite port=useConn // bundle = control
 #pragma HLS INTERFACE s_axilite port=basePortRx // bundle = control
 #pragma HLS INTERFACE s_axilite port=expectedRxByteCnt // bundle = control
-#pragma HLS INTERFACE s_axilite port=baseIpAddressTx // bundle=control
-#pragma HLS INTERFACE s_axilite port=basePortTx // bundle = control
 #pragma HLS INTERFACE s_axilite port=expectedTxPkgCnt // bundle = control
 #pragma HLS INTERFACE s_axilite port=pkgWordCountTx // bundle = control
 #pragma HLS INTERFACE s_axilite port = return bundle = // control
@@ -281,6 +277,10 @@ void entire_accelerator_v2(
     hls::stream<ap_uint<512>> s_kernel_network_in;
 #pragma HLS STREAM variable=s_kernel_network_in depth=2048
 
+    // for single connection only
+    hls::stream<ap_uint<16> > s_sessionID;
+#pragma HLS STREAM variable=s_sessionID depth=2
+
     // Wenqi-customized recv function, resolve deadlock in the case that
     //   input data rate >> FPGA query processing rate
     // recvDataSafe(expectedRxByteCnt, 
@@ -291,6 +291,7 @@ void entire_accelerator_v2(
     //     s_axis_tcp_rx_data);
     recvData(expectedRxByteCnt, 
         s_kernel_network_in,
+        s_sessionID,
         s_axis_tcp_notification, 
         m_axis_tcp_read_pkg, 
         s_axis_tcp_rx_meta, 
@@ -453,6 +454,8 @@ void entire_accelerator_v2(
 
     for (int s = 0; s < ADC_PE_NUM; s++) {
 #pragma HLS unroll
+
+#if ADC_DOUBLE_BUF_ENABLE == 0
         PQ_lookup_computation(
             query_num, 
             nprobe,
@@ -463,6 +466,18 @@ void entire_accelerator_v2(
             // output streams
             s_distance_LUT[s + 1],
             s_PQ_result[s]);
+#elif ADC_DOUBLE_BUF_ENABLE == 1
+        PQ_lookup_computation_double_buffer(
+            query_num, 
+            nprobe,
+            // input streams
+            s_distance_LUT[s],
+            s_PQ_codes[s],
+            s_scanned_entries_every_cell_ADC[s],
+            // output streams
+            s_distance_LUT[s + 1],
+            s_PQ_result[s]);
+#endif
     }
 
     dummy_distance_LUT_consumer(
@@ -499,15 +514,15 @@ void entire_accelerator_v2(
 
 ////////////////////     Send     ////////////////////
 
-    ap_uint<16> sessionID [8];
+    // ap_uint<16> sessionID [8];
 
-    openConnections(
-        useConn, 
-        baseIpAddressTx, 
-        basePortTx, 
-        m_axis_tcp_open_connection, 
-        s_axis_tcp_open_status, 
-        sessionID);
+    // openConnections(
+    //     useConn, 
+    //     baseIpAddressTx, 
+    //     basePortTx, 
+    //     m_axis_tcp_open_connection, 
+    //     s_axis_tcp_open_status, 
+    //     sessionID);
 
     ap_uint<64> expectedTxByteCnt = expectedTxPkgCnt * pkgWordCountTx * 64;
     sendData(
@@ -515,7 +530,7 @@ void entire_accelerator_v2(
         m_axis_tcp_tx_data, 
         s_axis_tcp_tx_status, 
         s_kernel_network_out, 
-        sessionID,
+        s_sessionID,
         useConn, 
         expectedTxByteCnt, 
         pkgWordCountTx);
@@ -527,6 +542,9 @@ void entire_accelerator_v2(
         m_axis_udp_tx, 
         s_axis_udp_rx_meta, 
         m_axis_udp_tx_meta);
+
+    tie_off_tcp_open_connection(m_axis_tcp_open_connection, 
+        s_axis_tcp_open_status);
 
     tie_off_tcp_close_con(m_axis_tcp_close_connection);
 

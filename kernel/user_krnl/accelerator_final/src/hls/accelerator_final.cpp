@@ -279,7 +279,7 @@ void accelerator_final(
         s_axis_tcp_port_status);
 
     hls::stream<ap_uint<512>> s_kernel_network_in;
-#pragma HLS STREAM variable=s_kernel_network_in depth=512
+#pragma HLS STREAM variable=s_kernel_network_in depth=2048
 
     // Wenqi-customized recv function, resolve deadlock in the case that
     //   input data rate >> FPGA query processing rate
@@ -300,13 +300,13 @@ void accelerator_final(
 ////////////////////     Network Input     ////////////////////
 
     hls::stream<int> s_cell_ID;
-#pragma HLS stream variable=s_cell_ID depth=256
+#pragma HLS stream variable=s_cell_ID depth=512
     
     hls::stream<ap_uint<512> > s_query_vectors;
-#pragma HLS stream variable=s_query_vectors depth=256
+#pragma HLS stream variable=s_query_vectors depth=512
     
     hls::stream<ap_uint<512> > s_center_vectors;
-#pragma HLS stream variable=s_center_vectors depth=256
+#pragma HLS stream variable=s_center_vectors depth=512
 
     network_input_processing(
         query_num,
@@ -322,16 +322,16 @@ void accelerator_final(
 ////////////////////     0. Initialization     ////////////////////
 
     hls::stream<int> s_nlist_PQ_codes_start_addr;
-#pragma HLS stream variable=s_nlist_PQ_codes_start_addr depth=256
+#pragma HLS stream variable=s_nlist_PQ_codes_start_addr depth=512
 
     hls::stream<int> s_nlist_vec_ID_start_addr; // the top 10 numbers
-#pragma HLS stream variable=s_nlist_vec_ID_start_addr depth=256
+#pragma HLS stream variable=s_nlist_vec_ID_start_addr depth=512
     
     hls::stream<int> s_nlist_num_vecs;
-#pragma HLS stream variable=s_nlist_num_vecs depth=256
+#pragma HLS stream variable=s_nlist_num_vecs depth=512
 
     hls::stream<float> s_product_quantizer_init;
-#pragma HLS stream variable=s_product_quantizer_init depth=256
+#pragma HLS stream variable=s_product_quantizer_init depth=512
 
     load_meta_data(
         nlist,
@@ -363,10 +363,10 @@ void accelerator_final(
 ////////////////////     2. ADC     ////////////////////
 
     hls::stream<int> s_cell_ID_get_cell_addr_and_size;
-#pragma HLS stream variable=s_cell_ID_get_cell_addr_and_size depth=256
+#pragma HLS stream variable=s_cell_ID_get_cell_addr_and_size depth=512
     
     hls::stream<int> s_cell_ID_load_PQ_codes;
-#pragma HLS stream variable=s_cell_ID_load_PQ_codes depth=256
+#pragma HLS stream variable=s_cell_ID_load_PQ_codes depth=512
 
     replicate_s_cell_ID(
         query_num,
@@ -376,19 +376,19 @@ void accelerator_final(
         s_cell_ID_load_PQ_codes);
 
     hls::stream<int> s_scanned_entries_every_cell;
-#pragma HLS stream variable=s_scanned_entries_every_cell depth=256
+#pragma HLS stream variable=s_scanned_entries_every_cell depth=512
 // #pragma HLS resource variable=s_scanned_entries_every_cell core=FIFO_SRL
     
     hls::stream<int> s_last_valid_PE_ID;
-#pragma HLS stream variable=s_last_valid_PE_ID depth=256
+#pragma HLS stream variable=s_last_valid_PE_ID depth=512
 // #pragma HLS resource variable=s_last_valid_PE_ID core=FIFO_SRL
     
     hls::stream<int> s_start_addr_every_cell;
-#pragma HLS stream variable=s_start_addr_every_cell depth=256
+#pragma HLS stream variable=s_start_addr_every_cell depth=512
 // #pragma HLS resource variable=s_start_addr_every_cell core=FIFO_SRL
     
     hls::stream<int> s_control_iter_num_per_query;
-#pragma HLS stream variable=s_control_iter_num_per_query depth=256
+#pragma HLS stream variable=s_control_iter_num_per_query depth=512
 // #pragma HLS resource variable=s_control_iter_num_per_query core=FIFO_SRL
     
     get_cell_addr_and_size(
@@ -407,12 +407,12 @@ void accelerator_final(
         s_control_iter_num_per_query);
 
     hls::stream<int> s_scanned_entries_every_cell_ADC[ADC_PE_NUM];
-#pragma HLS stream variable=s_scanned_entries_every_cell_ADC depth=256
+#pragma HLS stream variable=s_scanned_entries_every_cell_ADC depth=512
 #pragma HLS array_partition variable=s_scanned_entries_every_cell_ADC complete
 // #pragma HLS resource variable=s_scanned_entries_every_cell_ADC core=FIFO_SRL
 
     hls::stream<int> s_scanned_entries_every_cell_load_PQ_codes;
-#pragma HLS stream variable=s_scanned_entries_every_cell_load_PQ_codes depth=256
+#pragma HLS stream variable=s_scanned_entries_every_cell_load_PQ_codes depth=512
 // #pragma HLS resource variable=s_scanned_entries_every_cell_load_PQ_codes core=FIFO_SRL
 
     replicate_s_scanned_entries_every_cell(
@@ -487,7 +487,7 @@ void accelerator_final(
 ////////////////////     3. K-Selection     ////////////////////
 
     hls::stream<result_t> s_output; // the topK numbers
-#pragma HLS stream variable=s_output depth=256
+#pragma HLS stream variable=s_output depth=512
 
     hierarchical_priority_queue( 
         query_num, 

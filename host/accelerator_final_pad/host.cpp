@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
             OCL_CHECK(err,
                       network_kernel = cl::Kernel(program, "network_krnl", &err));
             OCL_CHECK(err,
-                      user_kernel = cl::Kernel(program, "entire_accelerator_v2", &err));
+                      user_kernel = cl::Kernel(program, "accelerator_final_pad", &err));
             valid_device++;
             break; // we break because we found a valid device
         }
@@ -336,6 +336,8 @@ int main(int argc, char **argv) {
         PRIORITY_QUEUE_LEN_L2 * 32 / 512 : PRIORITY_QUEUE_LEN_L2 * 32 / 512 + 1;
     size_t size_results = 1 + size_results_vec_ID + size_results_dist; // in 512-bit packet
     size_t out_bytes = query_num * 64 * size_results;
+    out_bytes_after_pad = 2048;
+    out_bytes = out_bytes_after_pad;
     // std::vector<int ,aligned_allocator<int>> out(out_bytes / sizeof(int));
 
     //////////     load data from disk     //////////

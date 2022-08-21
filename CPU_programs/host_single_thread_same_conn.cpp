@@ -4,7 +4,7 @@
 //   the cells to scan is computed at query time
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001 1 32
+// Usage (e.g.): ./host_single_thread_same_conn 10.253.74.24 8881 5001 1 32
 //  "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <Tx send_port> <Rx recv_port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>
 
 // Client side C/C++ program to demonstrate Socket programming 

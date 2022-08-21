@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
 
     if (argc != 7) {
         // Rx bytes = Tx byte (forwarding the data)
-        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5> <nprobe 6>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <nprobe 4>" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -64,33 +64,9 @@ int main(int argc, char **argv) {
     }
 
 
-    // Tx
-    int32_t TxIPAddr = 0x0A01D46E;//alveo0
-    {
-        std::string s = argv[4];
-        std::string delimiter = ".";
-        int ip [4];
-        size_t pos = 0;
-        std::string token;
-        int i = 0;
-        while ((pos = s.find(delimiter)) != std::string::npos) {
-            token = s.substr(0, pos);
-            ip [i] = stoi(token);
-            s.erase(0, pos + delimiter.length());
-            i++;
-        }
-        ip[i] = stoi(s); 
-        TxIPAddr = ip[3] | (ip[2] << 8) | (ip[1] << 16) | (ip[0] << 24);
-    }
-
-    int32_t basePortTx = 5002; 
-    {
-        basePortTx = strtol(argv[5], NULL, 10);
-    }
-
     size_t nprobe = 1;
     {
-        nprobe = strtol(argv[6], NULL, 10);
+        nprobe = strtol(argv[4], NULL, 10);
     }
 
     auto size = DATA_SIZE;
@@ -136,7 +112,7 @@ int main(int argc, char **argv) {
             OCL_CHECK(err,
                       network_kernel = cl::Kernel(program, "network_krnl", &err));
             OCL_CHECK(err,
-                      user_kernel = cl::Kernel(program, "entire_accelerator_v2", &err));
+                      user_kernel = cl::Kernel(program, "accelerator_final", &err));
             valid_device++;
             break; // we break because we found a valid device
         }
@@ -543,19 +519,15 @@ int main(int argc, char **argv) {
     OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 1, basePortRx));
     OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 2, rxByteCnt));
 
-    printf("TxIPAddr:%x \n", TxIPAddr);
-    std::cout << "basePortTx: " << basePortTx << std::endl; 
     std::cout << "expectedTxPkgCnt: " << expectedTxPkgCnt << std::endl; 
     std::cout << "pkgWordCountTx: " << pkgWordCountTx << std::endl; 
     std::cout << "(calculated) expected Tx bytes: expectedTxPkgCnt * pkgWordCountTx * 64: " << 
         expectedTxPkgCnt * pkgWordCountTx * 64 << std::endl; 
     
-    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 3, TxIPAddr));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 4, basePortTx));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 5, expectedTxPkgCnt));
-    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 6, pkgWordCountTx));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 3, expectedTxPkgCnt));
+    OCL_CHECK(err, err = user_kernel.setArg(start_param_network + 4, pkgWordCountTx));
 
-    int start_param_accelerator = 16 + 7;
+    int start_param_accelerator = 16 + 5;
 
     // in init
     OCL_CHECK(err, err = user_kernel.setArg(start_param_accelerator + 0, int(query_num)));
