@@ -4,8 +4,8 @@
 //   the cells to scan is computed at query time
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001 1 32
-//  "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <Tx send_port> <Rx recv_port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>
+// Usage (e.g.): ./host_single_thread_same_conn_non_blocking 10.253.74.24 5001 1 32
+//  "Usage: " << argv[0] << " <Tx (FPGA) IP_addr>  <Rx & Tx port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
@@ -28,12 +28,13 @@
 #define D 128
 #define TOPK 100
 
-#define SEND_PKG_SIZE 17088 // 1024 
+#define SEND_PKG_SIZE 4096 // 1024 
 #define RECV_PKG_SIZE 4096 // 1024
 
-// #define DEBUG
-// #define PAD // pad result size to 2048
+#define DEBUG
 
+int sock = 0;
+int recv_begin = false;
 
 template <typename T>
 struct aligned_allocator
@@ -60,6 +61,7 @@ std::string dir_concat(std::string dir1, std::string dir2) {
     return dir1 + dir2;
 }
 
+
 void thread_send_packets(
     const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
     float* query_vectors_ptr, float* vector_quantizer_ptr, 
@@ -68,7 +70,7 @@ void thread_send_packets(
     std::chrono::system_clock::time_point* query_start_time_ptr); 
 
 void thread_recv_packets(
-    unsigned int recv_port, int query_num, int recv_bytes_per_query, char* out_buf,
+    int query_num, int recv_bytes_per_query, char* out_buf,
     int* start_recv, int* finish_recv_query_id,
     std::chrono::system_clock::time_point* query_finish_time_ptr); 
     
@@ -77,7 +79,7 @@ int main(int argc, char const *argv[])
 { 
     //////////     Parameter Init     //////////
     
-    std::cout << "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <Tx send_port> <Rx recv_port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <<Rx & Tx port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>" << std::endl;
 
     const char* IP_addr;
     if (argc >= 2)
@@ -90,16 +92,10 @@ int main(int argc, char const *argv[])
         IP_addr = "10.253.74.24"; // alveo-u250-04
     }
 
-    unsigned int send_port = 8888;
+    unsigned int send_port = 5001;
     if (argc >= 3)
     {
         send_port = strtol(argv[2], NULL, 10);
-    } 
-
-    unsigned int recv_port = 5001;
-    if (argc >= 4)
-    {
-        recv_port = strtol(argv[3], NULL, 10);
     } 
     
     // how many queries are allow to send ahead of receiving results
@@ -107,15 +103,15 @@ int main(int argc, char const *argv[])
     // e.g., when send_recv_query_gap = 0, result 1 must be received before query 2 can be sent, 
     //          but might lead to a deadlock
     int send_recv_query_gap = 1;
-    if (argc >= 5)
+    if (argc >= 4)
     {
-        send_recv_query_gap = strtol(argv[4], NULL, 10);
+        send_recv_query_gap = strtol(argv[3], NULL, 10);
     } 
 
     size_t nprobe = 1;
-    if (argc >= 6)
+    if (argc >= 5)
     {
-        nprobe = strtol(argv[5], NULL, 10);
+        nprobe = strtol(argv[4], NULL, 10);
     } 
 
     std::string db_name = "SIFT1000M"; // SIFT100M or SIFT1000M
@@ -130,6 +126,7 @@ int main(int argc, char const *argv[])
 
     assert (nprobe <= nlist);
 
+
     // out
     // 128 is a random padding for network headers
     // header = 1 pkt
@@ -138,10 +135,7 @@ int main(int argc, char const *argv[])
     size_t size_results_dist = TOPK * 32 % 512 == 0?
         TOPK * 32 / 512 : TOPK * 32 / 512 + 1;
     size_t size_results = 1 + size_results_vec_ID + size_results_dist; // in 512-bit packet
-#ifdef PAD
-    size_t size_results_padded = 32;
-    size_results = size_results_padded;
-#endif
+
     size_t out_bytes = query_num * 64 * size_results;
     int recv_bytes_per_query = 64 * size_results;
 
@@ -322,6 +316,7 @@ int main(int argc, char const *argv[])
     //////////     Networking Part     //////////
 
     // inter-thread communication by shared memory
+    // inter-thread communication by shared memory
     int start_recv = 0; 
     int finish_recv_query_id = -1;
 
@@ -335,8 +330,10 @@ int main(int argc, char const *argv[])
         send_recv_query_gap, &start_recv, &finish_recv_query_id,
         query_start_time.data());
 
+    sleep(1);
+
     std::thread t_recv(
-        thread_recv_packets, recv_port, query_num, recv_bytes_per_query, out_buf,
+        thread_recv_packets, query_num, recv_bytes_per_query, out_buf,
         &start_recv, &finish_recv_query_id, query_finish_time.data());
 
     t_send.join();
@@ -478,57 +475,19 @@ int main(int argc, char const *argv[])
 
 
 void thread_recv_packets(
-    unsigned int recv_port, int query_num, int recv_bytes_per_query, char* out_buf,
+    int query_num, int recv_bytes_per_query, char* out_buf,
     int* start_recv, int* finish_recv_query_id,
     std::chrono::system_clock::time_point* query_finish_time_ptr) { 
 
-    printf("Printing recv_port from Thread %d\n", recv_port); 
+    printf("Printing recv_port from Thread\n"); 
 
-    int server_fd, sock;
-    struct sockaddr_in address;
-    int opt = 1;
-    int addrlen = sizeof(address);
-
-    // Creating socket file descriptor 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR , &opt, sizeof(opt)))
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
+    // wait for ready
+    volatile int dummy_count = 0;
+    while(!(*start_recv)) { 
+        dummy_count++;
     }
 
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(recv_port);
-
-    // Forcefully attaching socket to the recv_port 8080 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-    if (listen(server_fd, 3) < 0)
-    {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-    if ((sock = accept(server_fd, (struct sockaddr *)&address,
-                       (socklen_t*)&addrlen))<0)
-    {
-        perror("accept");
-        exit(EXIT_FAILURE);
-    }
-    printf("Successfully built connection.\n"); 
-    *start_recv = 1; // set shared register
-
-
-    printf("Start receiving data.\n");
     ////////////////   Data transfer   ////////////////
-
 
     // Should wait until the server said all the data was sent correctly,
     // otherwise the sender may send packets yet the server did not receive.
@@ -553,18 +512,14 @@ void thread_recv_packets(
                 std::cout << "query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
             }
 #endif
-//             if (recv_bytes > 0) {
-//                 // set shared register as soon as the first packet of the results is received
-//                 *finish_recv_query_id = query_id; 
-// #ifdef DEBUG
-//                 std::cout << "set finish_recv_query_id: " << query_id  << std::endl;
-// #endif
-//             }
-        }
-            {
+            if (recv_bytes > 0) {
                 // set shared register as soon as the first packet of the results is received
                 *finish_recv_query_id = query_id; 
+#ifdef DEBUG
+                std::cout << "set finish_recv_query_id: " << query_id  << std::endl;
+#endif
             }
+        }
 
         if (total_recv_bytes != recv_bytes_per_query) {
             printf("Receiving error, receiving more bytes than a block\n");
@@ -605,12 +560,6 @@ void thread_send_packets(
     int send_bytes_per_query = 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
     std::cout << "send_bytes_per_query: " << send_bytes_per_query << std::endl;
     std::vector<char ,aligned_allocator<char >> FPGA_input(FPGA_input_bytes);
-
-    // wait for ready
-    volatile int dummy_count = 0;
-    while(!(*start_recv)) { 
-        dummy_count++;
-    }
  
     printf("Printing send_port from Thread %d\n", send_port); 
     
@@ -640,7 +589,7 @@ void thread_send_packets(
         printf("\nConnection Failed \n"); 
         return; 
     } 
-
+    *start_recv = 1; // start recv once send starts
     printf("Start sending data.\n");
     ////////////////   Data transfer + Select Cells   ////////////////
 

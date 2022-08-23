@@ -139,6 +139,17 @@ FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
 ./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8888 10.253.74.5 5008 32
 ```
 
+### accelerator_final_sameCon
+
+
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001)**
+
+FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
+
+```
+# For u250-04 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 5008 32
+```
 
 ## Architecture Overview
 
