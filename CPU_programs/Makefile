@@ -2,7 +2,7 @@ CC = g++
 CLAGS=-Wall
 LINK = -lpthread
 
-all: network_send network_send_slow network_send_per_query network_recv query_send_thread result_recv_thread host_single_thread host_single_thread_same_conn host_single_thread_same_conn_non_blocking hnswlib_save_load_index
+all: network_send network_send_slow network_send_per_query network_recv query_send_thread result_recv_thread host_single_thread host_multi_thread host_single_thread_same_conn host_single_thread_same_conn_non_blocking hnswlib_save_load_index
 
 network_send: network_send.cpp
 	${CC} ${CLAGS} network_send.cpp ${LINK} -o network_send
@@ -25,6 +25,9 @@ result_recv_thread: result_recv_thread.cpp
 host_single_thread: host_single_thread.cpp
 	${CC} ${CLAGS} host_single_thread.cpp ${LINK} -o host_single_thread
 
+host_multi_thread: host_multi_thread.cpp
+	${CC} ${CLAGS} host_multi_thread.cpp ${LINK} -o host_multi_thread
+
 host_single_thread_same_conn: host_single_thread_same_conn.cpp
 	${CC} ${CLAGS} host_single_thread_same_conn.cpp ${LINK} -o host_single_thread_same_conn
 
@@ -39,4 +42,4 @@ hnswlib_save_load_index: hnswlib_save_load_index.cpp
 cleanall: clean
 
 clean:
-	rm network_send network_send_slow network_send_per_query network_recv  query_send_thread result_recv_thread host_single_thread host_single_thread_same_conn host_single_thread_same_conn_non_blocking
+	rm network_send network_send_slow network_send_per_query network_recv  query_send_thread result_recv_thread host_single_thread host_multi_thread host_single_thread_same_conn host_single_thread_same_conn_non_blocking

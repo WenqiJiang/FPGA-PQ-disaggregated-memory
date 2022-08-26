@@ -30,7 +30,12 @@
 #include "../../../../common/include/communication.hpp"
 #include "hls_stream.h"
 
+#include "ADC.hpp"
 #include "constants.hpp"
+#include "DRAM_utils.hpp"
+#include "helpers.hpp"
+#include "hierarchical_priority_queue.hpp"
+#include "LUT_construction.hpp"
 #include "types.hpp"
 
 /*
@@ -102,56 +107,6 @@ void network_input_processing(
     }
 }
 
-void simulated_accelerator_kernel(
-    int query_num,
-    int nprobe,
-    int delay_cycle_per_cell,
-    // runtime input
-    hls::stream<int>& s_cell_ID,
-    hls::stream<ap_uint<512> >& s_query_vectors,
-    hls::stream<ap_uint<512> >& s_center_vectors,
-    // runtime output
-    hls::stream<result_t> &s_output) {
-
-    const int size_query_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
-    const int size_center_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
-
-    for (int query_id = 0; query_id < query_num; query_id++) {
-
-        ap_uint<512> query;
-        for (int i = 0; i < size_query_vector; i++) {
-            query = s_query_vectors.read();
-        }
-
-        ap_uint<512> center;
-        int cell_ID;
-        for (int cell_id = 0; cell_id < nprobe; cell_id++) {
-
-            cell_ID = s_cell_ID.read();
-            // read
-            for (int i = 0; i < size_center_vector; i++) {
-                center = s_center_vectors.read();
-            }
-
-            // delay: simulate accelerator compute
-            volatile int delay_cnt = 0;
-            while (delay_cnt < delay_cycle_per_cell) {
-                delay_cnt++;
-            }
-        }
-
-        // send out all results per query
-        result_t out_reg;
-        out_reg.vec_ID.range(31, 0) = query.range(31, 0);
-        out_reg.vec_ID.range(63, 32) = center.range(31, 0);
-        out_reg.dist = cell_ID;
-
-        for (int k = 0; k < TOPK; k++) {
-            s_output.write(out_reg);
-        }
-    }
-}
-
 void network_output_processing(
     int query_num,
     hls::stream<result_t> &s_output, 
@@ -217,7 +172,7 @@ void network_output_processing(
 
 
 extern "C" {
-void network_sim_accel_flush(
+void accelerator_flush_explicit(
      // Internal Stream
      hls::stream<pkt512>& s_axis_udp_rx, 
      hls::stream<pkt512>& m_axis_udp_tx, 
@@ -252,7 +207,21 @@ void network_sim_accel_flush(
     int query_num, 
     int nlist,
     int nprobe,
-    int delay_cycle_per_cell
+    int* meta_data_init, // which consists of the following three stuffs:
+                    // int* nlist_PQ_codes_start_addr,
+                    // int* nlist_vec_ID_start_addr,
+                    // int* nlist_num_vecs,
+                    // float* product_quantizer
+
+    // in runtime (should from DRAM)
+    const ap_uint<512>* PQ_codes_DRAM_0,
+    const ap_uint<512>* PQ_codes_DRAM_1,
+    const ap_uint<512>* PQ_codes_DRAM_2,
+    const ap_uint<512>* PQ_codes_DRAM_3,
+    ap_uint<64>* vec_ID_DRAM_0,
+    ap_uint<64>* vec_ID_DRAM_1,
+    ap_uint<64>* vec_ID_DRAM_2,
+    ap_uint<64>* vec_ID_DRAM_3
                       ) {
 
 // network 
@@ -283,10 +252,21 @@ void network_sim_accel_flush(
 #pragma HLS INTERFACE s_axilite port = return bundle = // control
 
 // accelerator kernel 
+
 #pragma HLS INTERFACE s_axilite port=query_num // bundle = control
 #pragma HLS INTERFACE s_axilite port=nlist // bundle = control
 #pragma HLS INTERFACE s_axilite port=nprobe // bundle = control
-#pragma HLS INTERFACE s_axilite port=delay_cycle_per_cell // bundle = control
+
+#pragma HLS INTERFACE m_axi port=meta_data_init offset=slave bundle=gmem3
+#pragma HLS INTERFACE m_axi port=PQ_codes_DRAM_0 offset=slave bundle=gmem5
+#pragma HLS INTERFACE m_axi port=PQ_codes_DRAM_1 offset=slave bundle=gmem6
+#pragma HLS INTERFACE m_axi port=PQ_codes_DRAM_2 offset=slave bundle=gmem7
+#pragma HLS INTERFACE m_axi port=PQ_codes_DRAM_3 offset=slave bundle=gmem8
+#pragma HLS INTERFACE m_axi port=vec_ID_DRAM_0  offset=slave bundle=gmem9
+#pragma HLS INTERFACE m_axi port=vec_ID_DRAM_1  offset=slave bundle=gmem10
+#pragma HLS INTERFACE m_axi port=vec_ID_DRAM_2  offset=slave bundle=gmem11
+#pragma HLS INTERFACE m_axi port=vec_ID_DRAM_3  offset=slave bundle=gmem12
+
 
 #pragma HLS dataflow
 
@@ -339,20 +319,186 @@ void network_sim_accel_flush(
         s_center_vectors);
 
 
-////////////////////     Accelerator Simulation     ////////////////////
+////////////////////     0. Initialization     ////////////////////
+
+    hls::stream<int> s_nlist_PQ_codes_start_addr;
+#pragma HLS stream variable=s_nlist_PQ_codes_start_addr depth=512
+
+    hls::stream<int> s_nlist_vec_ID_start_addr; // the top 10 numbers
+#pragma HLS stream variable=s_nlist_vec_ID_start_addr depth=512
+    
+    hls::stream<int> s_nlist_num_vecs;
+#pragma HLS stream variable=s_nlist_num_vecs depth=512
+
+    hls::stream<float> s_product_quantizer_init;
+#pragma HLS stream variable=s_product_quantizer_init depth=512
+
+    load_meta_data(
+        nlist,
+        meta_data_init,
+        s_nlist_PQ_codes_start_addr,
+        s_nlist_vec_ID_start_addr,
+        s_nlist_num_vecs,
+        s_product_quantizer_init);
+
+////////////////////     1. Construct LUT     ////////////////////
+
+
+    hls::stream<distance_LUT_parallel_t> s_distance_LUT[ADC_PE_NUM + 1];
+#pragma HLS stream variable=s_distance_LUT depth=8
+#pragma HLS array_partition variable=s_distance_LUT complete
+// #pragma HLS resource variable=s_distance_LUT core=FIFO_SRL
+
+    LUT_construction_wrapper(
+    // init
+    query_num,
+    nprobe, 
+    s_product_quantizer_init,
+    // runtime input from network
+    s_query_vectors,
+    s_center_vectors,
+    // output
+    s_distance_LUT[0]);
+
+////////////////////     2. ADC     ////////////////////
+
+    hls::stream<int> s_cell_ID_get_cell_addr_and_size;
+#pragma HLS stream variable=s_cell_ID_get_cell_addr_and_size depth=512
+    
+    hls::stream<int> s_cell_ID_load_PQ_codes;
+#pragma HLS stream variable=s_cell_ID_load_PQ_codes depth=512
+
+    replicate_s_cell_ID(
+        query_num,
+        nprobe,
+        s_cell_ID,
+        s_cell_ID_get_cell_addr_and_size,
+        s_cell_ID_load_PQ_codes);
+
+    hls::stream<int> s_scanned_entries_every_cell;
+#pragma HLS stream variable=s_scanned_entries_every_cell depth=512
+// #pragma HLS resource variable=s_scanned_entries_every_cell core=FIFO_SRL
+    
+    hls::stream<int> s_last_valid_PE_ID;
+#pragma HLS stream variable=s_last_valid_PE_ID depth=512
+// #pragma HLS resource variable=s_last_valid_PE_ID core=FIFO_SRL
+    
+    hls::stream<int> s_start_addr_every_cell;
+#pragma HLS stream variable=s_start_addr_every_cell depth=512
+// #pragma HLS resource variable=s_start_addr_every_cell core=FIFO_SRL
+    
+    hls::stream<int> s_control_iter_num_per_query;
+#pragma HLS stream variable=s_control_iter_num_per_query depth=512
+// #pragma HLS resource variable=s_control_iter_num_per_query core=FIFO_SRL
+    
+    get_cell_addr_and_size(
+        // in init
+        query_num, 
+	    nlist,
+        nprobe,
+        s_nlist_PQ_codes_start_addr,
+        s_nlist_num_vecs,
+        // in runtime
+        s_cell_ID_get_cell_addr_and_size,
+        // out
+        s_scanned_entries_every_cell,
+        s_last_valid_PE_ID,
+        s_start_addr_every_cell,
+        s_control_iter_num_per_query);
+
+    hls::stream<int> s_scanned_entries_every_cell_ADC[ADC_PE_NUM];
+#pragma HLS stream variable=s_scanned_entries_every_cell_ADC depth=512
+#pragma HLS array_partition variable=s_scanned_entries_every_cell_ADC complete
+// #pragma HLS resource variable=s_scanned_entries_every_cell_ADC core=FIFO_SRL
+
+    hls::stream<int> s_scanned_entries_every_cell_load_PQ_codes;
+#pragma HLS stream variable=s_scanned_entries_every_cell_load_PQ_codes depth=512
+// #pragma HLS resource variable=s_scanned_entries_every_cell_load_PQ_codes core=FIFO_SRL
+
+    replicate_s_scanned_entries_every_cell(
+        // in
+        query_num,
+        nprobe,
+        s_scanned_entries_every_cell,
+        // out
+        s_scanned_entries_every_cell_ADC,
+        s_scanned_entries_every_cell_load_PQ_codes);
+
+    hls::stream<PQ_in_t> s_PQ_codes[ADC_PE_NUM];
+#pragma HLS stream variable=s_PQ_codes depth=8
+#pragma HLS array_partition variable=s_PQ_codes complete
+// #pragma HLS resource variable=s_PQ_codes core=FIFO_SRL
+
+    load_PQ_codes(
+        // in init
+        query_num, 
+        nprobe,
+        // in runtime
+        s_cell_ID_load_PQ_codes,
+        s_scanned_entries_every_cell_load_PQ_codes,
+        s_last_valid_PE_ID,
+        s_start_addr_every_cell,
+        PQ_codes_DRAM_0,
+        PQ_codes_DRAM_1,
+        PQ_codes_DRAM_2,
+        PQ_codes_DRAM_3,
+        // out
+        s_PQ_codes);
+
+    hls::stream<PQ_out_t> s_PQ_result[ADC_PE_NUM];
+#pragma HLS stream variable=s_PQ_result depth=8
+#pragma HLS array_partition variable=s_PQ_result complete
+// #pragma HLS resource variable=s_PQ_result core=FIFO_SRL
+
+
+    for (int s = 0; s < ADC_PE_NUM; s++) {
+#pragma HLS unroll
+
+#if ADC_DOUBLE_BUF_ENABLE == 0
+        PQ_lookup_computation(
+            query_num, 
+            nprobe,
+            // input streams
+            s_distance_LUT[s],
+            s_PQ_codes[s],
+            s_scanned_entries_every_cell_ADC[s],
+            // output streams
+            s_distance_LUT[s + 1],
+            s_PQ_result[s]);
+#elif ADC_DOUBLE_BUF_ENABLE == 1
+        PQ_lookup_computation_double_buffer(
+            query_num, 
+            nprobe,
+            // input streams
+            s_distance_LUT[s],
+            s_PQ_codes[s],
+            s_scanned_entries_every_cell_ADC[s],
+            // output streams
+            s_distance_LUT[s + 1],
+            s_PQ_result[s]);
+#endif
+    }
+
+    dummy_distance_LUT_consumer(
+        query_num, 
+        nprobe,
+        s_distance_LUT[ADC_PE_NUM]);
+
+////////////////////     3. K-Selection     ////////////////////
 
     hls::stream<result_t> s_output; // the topK numbers
 #pragma HLS stream variable=s_output depth=512
 
-    simulated_accelerator_kernel(
-        query_num,
-        nprobe,
-        delay_cycle_per_cell,
-        // runtime input
-        s_cell_ID,
-        s_query_vectors,
-        s_center_vectors,
-        // runtime output
+    hierarchical_priority_queue( 
+        query_num, 
+        nlist,
+        s_nlist_vec_ID_start_addr,
+        s_control_iter_num_per_query, 
+        s_PQ_result,
+        vec_ID_DRAM_0,
+        vec_ID_DRAM_1,
+        vec_ID_DRAM_2,
+        vec_ID_DRAM_3,
         s_output);
 
 ////////////////////     Network Output     ////////////////////
@@ -378,7 +524,6 @@ void network_sim_accel_flush(
         sessionID);
 
     ap_uint<64> expectedTxByteCnt = expectedTxPkgCnt * pkgWordCountTx * 64;
-
     // Wenqi: for all the iterations, only send out tx_meta when input data is available
     sendDataProtected(
     // sendData(

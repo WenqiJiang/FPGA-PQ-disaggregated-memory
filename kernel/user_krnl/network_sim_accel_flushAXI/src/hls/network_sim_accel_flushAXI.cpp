@@ -152,6 +152,27 @@ void simulated_accelerator_kernel(
     }
 }
 
+// attach to AXI, the default free-runing pipeline (frp) would not work here
+//   thus we can try either (a) using flushable pipeline (flp) or disable pipeline
+void AXI_data_processing(
+    int query_num,
+    float* in_DDR,
+    hls::stream<result_t> &s_input,
+    hls::stream<result_t> &s_output) {
+
+    for (int query_id = 0; query_id < query_num; query_id++) {
+
+        for (int k = 0; k < TOPK; k++) {
+// use one of the following
+#pragma HLS pipeline style=flp
+// #pragma HLS pipeline off
+            result_t reg = s_input.read();
+            reg.dist += in_DDR[k];
+            s_output.write(reg);
+        }
+    }
+}
+
 void network_output_processing(
     int query_num,
     hls::stream<result_t> &s_output, 
@@ -217,7 +238,7 @@ void network_output_processing(
 
 
 extern "C" {
-void network_sim_accel_flush(
+void network_sim_accel_flushAXI(
      // Internal Stream
      hls::stream<pkt512>& s_axis_udp_rx, 
      hls::stream<pkt512>& m_axis_udp_tx, 
@@ -252,7 +273,9 @@ void network_sim_accel_flush(
     int query_num, 
     int nlist,
     int nprobe,
-    int delay_cycle_per_cell
+    int delay_cycle_per_cell,
+    float* in_DDR
+    // data bank
                       ) {
 
 // network 
@@ -287,6 +310,8 @@ void network_sim_accel_flush(
 #pragma HLS INTERFACE s_axilite port=nlist // bundle = control
 #pragma HLS INTERFACE s_axilite port=nprobe // bundle = control
 #pragma HLS INTERFACE s_axilite port=delay_cycle_per_cell // bundle = control
+
+#pragma HLS INTERFACE m_axi port=in_DDR offset=slave bundle=gmem0
 
 #pragma HLS dataflow
 
@@ -341,8 +366,8 @@ void network_sim_accel_flush(
 
 ////////////////////     Accelerator Simulation     ////////////////////
 
-    hls::stream<result_t> s_output; // the topK numbers
-#pragma HLS stream variable=s_output depth=512
+    hls::stream<result_t> s_output_A; // the topK numbers
+#pragma HLS stream variable=s_output_A depth=512
 
     simulated_accelerator_kernel(
         query_num,
@@ -353,7 +378,16 @@ void network_sim_accel_flush(
         s_query_vectors,
         s_center_vectors,
         // runtime output
-        s_output);
+        s_output_A);
+
+    hls::stream<result_t> s_output_B; // the topK numbers
+#pragma HLS stream variable=s_output_B depth=512
+
+    AXI_data_processing(
+        query_num,
+        in_DDR,
+        s_output_A,
+        s_output_B);
 
 ////////////////////     Network Output     ////////////////////
 
@@ -362,7 +396,7 @@ void network_sim_accel_flush(
 
     network_output_processing(
         query_num,
-        s_output, 
+        s_output_B, 
         s_kernel_network_out);
 
 ////////////////////     Send     ////////////////////
@@ -378,7 +412,7 @@ void network_sim_accel_flush(
         sessionID);
 
     ap_uint<64> expectedTxByteCnt = expectedTxPkgCnt * pkgWordCountTx * 64;
-
+    
     // Wenqi: for all the iterations, only send out tx_meta when input data is available
     sendDataProtected(
     // sendData(
