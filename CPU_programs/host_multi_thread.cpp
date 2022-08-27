@@ -6,9 +6,9 @@
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
 //  "Usage: " << argv[0] << "<num_FPGA> <Tx (FPGA) IP_addr (num_FPGA))> <Tx send_port (num_FPGA)> <Rx recv_port (num_FPGA)> <SEND_RECV_GAP (0~N, == batch size - 1)> <nprobe>" 
-// e.g. 1 FPGA: ./host_multi_thread 10.253.74.12 8881 5001 0 32
-// e.g. 2 FPGA: ./host_multi_thread 10.253.74.12 10.253.74.16 8881 8882 5001 5002 0 32
-// e.g. 4 FPGA: ./host_multi_thread 10.253.74.12 10.253.74.16 10.253.74.20 10.253.74.24 8881 8882 8883 8884 5001 5002 5003 5004 0 32
+// e.g. 1 FPGA: ./host_multi_thread 1 10.253.74.12 8881 5001 0 32
+// e.g. 2 FPGA: ./host_multi_thread 2 10.253.74.12 10.253.74.16 8881 8882 5001 5002 0 32
+// e.g. 4 FPGA: ./host_multi_thread 4 10.253.74.12 10.253.74.16 10.253.74.20 10.253.74.24 8881 8882 8883 8884 5001 5002 5003 5004 0 32
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
@@ -75,11 +75,11 @@ void thread_HNSW(
 void thread_send_packets(
     const char* IP_addr, unsigned int send_port, 
     int num_FPGA, int thread_id, int query_num, int nprobe, int send_bytes_per_query,
-    char* FPGA_input, int* finish_hnsw_id, int* start_recv, int* start_send);
+    char* FPGA_input, int* finish_hnsw_id, int* finish_send_query_id, int* start_recv, int* start_send);
 
 void thread_recv_packets(
     unsigned int recv_port, int num_FPGA, int thread_id, int query_num, int recv_bytes_per_query, char* out_buf,
-    int* start_recv, int* finish_recv_query_id);
+    int* start_recv, int* finish_send_query_id, int* finish_recv_query_id);
 
 void thread_result_gather(
     int num_FPGA, int query_num, int*finish_recv_query_id,
@@ -341,6 +341,7 @@ int main(int argc, char const *argv[])
     int start_recv[num_FPGA] = { 0 }; // turns to 1 once recv conn opens, then send thread build conn
     int start_send[num_FPGA] = { 0 }; // turns to 1 once send conn opens, then HNSW thread starts
     int finish_hnsw_id = -1; // produced by HNSW thread, consumed by send thread
+    int finish_send_query_id[num_FPGA] = { -1 }; //produced by send threads, consumed by recv thread
     int finish_recv_query_id[num_FPGA] = { -1 }; //produced by recv threads, consumed by HNSW thread
 
 
@@ -365,7 +366,7 @@ int main(int argc, char const *argv[])
         t_send[i] = std::thread(
             thread_send_packets, 
             IP_addr[i], send_port[i], num_FPGA, i, query_num, nprobe, send_bytes_per_query,
-            FPGA_input.data(), &finish_hnsw_id, (int*) start_recv, (int*) start_send);
+            FPGA_input.data(), &finish_hnsw_id, (int*) finish_send_query_id, (int*) start_recv, (int*) start_send);
     }
 
     // recv
@@ -374,7 +375,7 @@ int main(int argc, char const *argv[])
         t_recv[i] = std::thread(
             thread_recv_packets, 
             recv_port[i], num_FPGA, i, query_num, recv_bytes_per_query, out_buf,
-            (int*) start_recv, (int*) finish_recv_query_id);
+            (int*) start_recv, (int*) finish_send_query_id, (int*) finish_recv_query_id);
     }
 
     std::thread t_gather(
@@ -641,7 +642,7 @@ void thread_HNSW(
 void thread_send_packets(
     const char* IP_addr, unsigned int send_port, 
     int num_FPGA, int thread_id, int query_num, int nprobe, int send_bytes_per_query,
-    char* FPGA_input, int* finish_hnsw_id, int* start_recv, int* start_send) { 
+    char* FPGA_input, int* finish_hnsw_id, int* finish_send_query_id, int* start_recv, int* start_send) { 
 
     printf("Printing send_port %d from Thread %d\n", send_port, thread_id); 
 
@@ -690,6 +691,7 @@ void thread_send_packets(
     } 
 
     printf("Start sending data send_port %d from Thread %d\n", send_port, thread_id); 
+    start_send[thread_id] = 1;
     ////////////////   Data transfer   ////////////////
 
     std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
@@ -702,7 +704,7 @@ void thread_send_packets(
             dummy_count++;
         }
 
-        std::cout << "send query_id " << query_id << std::endl;
+        std::cout << "thread " << thread_id << " send query_id " << query_id << std::endl;
 
         // send data
         int total_sent_bytes = 0;
@@ -725,6 +727,7 @@ void thread_send_packets(
         if (total_sent_bytes != send_bytes_per_query) {
             printf("Sending error, sending more bytes than a block\n");
         }
+        finish_send_query_id[thread_id] = query_id;
     }
 
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
@@ -740,7 +743,7 @@ void thread_send_packets(
 
 void thread_recv_packets(
     unsigned int recv_port, int num_FPGA, int thread_id, int query_num, int recv_bytes_per_query, char* out_buf,
-    int* start_recv, int* finish_recv_query_id) { 
+    int* start_recv, int* finish_send_query_id, int* finish_recv_query_id) { 
 
     printf("Printing recv_port %d from Thread %d\n", recv_port, thread_id); 
 
@@ -796,8 +799,15 @@ void thread_recv_packets(
     std::chrono::system_clock::time_point start = std::chrono::system_clock::now(); // reset after recving the first query
 
     for (int query_id = 0; query_id < query_num; query_id++) {
+ 
+        // wait for send thread, if sock begins early then send, it will occupy socket resource,
+        //   and other threads recv might not easy to get in (very slow)
+        volatile int dummy_count = 0;
+        while(finish_send_query_id[thread_id] < query_id) {  
+            dummy_count++;
+        }
 
-        std::cout << "recv query_id " << query_id << std::endl;
+        std::cout << "thread " << thread_id << " recv query_id " << query_id << std::endl;
         int total_recv_bytes = 0;
         while (total_recv_bytes < recv_bytes_per_query) {
             int recv_bytes_this_iter = (recv_bytes_per_query - total_recv_bytes) < RECV_PKG_SIZE? (recv_bytes_per_query - total_recv_bytes) : RECV_PKG_SIZE;
@@ -810,7 +820,7 @@ void thread_recv_packets(
             }
 #ifdef DEBUG
             else {
-                std::cout << "query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
+                std::cout << "thread " << thread_id << " query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
             }
 #endif
 //             if (recv_bytes > 0) {

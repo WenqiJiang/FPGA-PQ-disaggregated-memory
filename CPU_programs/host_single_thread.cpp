@@ -31,7 +31,7 @@
 #define SEND_PKG_SIZE 1024 // 1024 
 #define RECV_PKG_SIZE 4096 // 1024
 
-#define DEBUG
+// #define DEBUG
 // #define PAD // pad result size to 2048
 
 

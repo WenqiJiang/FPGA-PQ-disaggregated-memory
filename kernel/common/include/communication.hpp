@@ -799,7 +799,8 @@ void sendData(hls::stream<pkt32>& m_axis_tcp_tx_meta,
 }
 
 // Wenqi: for all the iterations, only send out tx_meta when input data is available
-// However, this is more difficult for P&R
+//   this is appropriate for query scenario, where the output data is not consecutive
+//   keep sending tx_meta without checking whether output data is available will cause deadlock
 void sendDataProtected(hls::stream<pkt32>& m_axis_tcp_tx_meta, 
                hls::stream<pkt512>& m_axis_tcp_tx_data, 
                hls::stream<pkt64>& s_axis_tcp_tx_status,
@@ -881,7 +882,7 @@ void sendDataProtected(hls::stream<pkt32>& m_axis_tcp_tx_meta,
                          {
                               volatile int counter = 0;
                               while (s_data_in.empty()) { counter++; }
-                              
+
                               tx_meta_pkt.data(15,0) = sessionID[currentSessionIndex];
                               if (sentByteCnt + pkgWordCount*64 < expectedTxByteCnt )
                               {
