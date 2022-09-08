@@ -22,9 +22,9 @@ void thread_recv_packets(unsigned int port, int recv_bytes);
 
 int main(int argc, char const *argv[]) 
 { 
-    int recv_bytes = 1024 * 128; // the number of bytes to be received
+    int recv_bytes = 10000 * 1344; // 1024 * 128; // the number of bytes to be received
     // unsigned int port = 8880;
-    unsigned int port = 5003;
+    unsigned int port = 8888;
 
     std::thread th0(thread_recv_packets, port, recv_bytes);
     

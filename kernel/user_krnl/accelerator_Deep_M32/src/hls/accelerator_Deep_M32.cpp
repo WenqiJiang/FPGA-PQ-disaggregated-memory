@@ -172,7 +172,7 @@ void network_output_processing(
 
 
 extern "C" {
-void accelerator_flush_explicit(
+void accelerator_Deep_M32(
      // Internal Stream
      hls::stream<pkt512>& s_axis_udp_rx, 
      hls::stream<pkt512>& m_axis_udp_tx, 

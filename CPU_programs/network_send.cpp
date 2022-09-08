@@ -23,12 +23,12 @@ void thread_send_packets(const char* IP_addr, unsigned int port, int send_bytes)
 int main(int argc, char const *argv[]) 
 { 
 
-    unsigned int port = 8888;
-    int send_bytes = 1024 * 1024;
-    // const char* IP_addr = "10.253.74.5"; // alveo-build-01
+    unsigned int port = 5008;
+    int send_bytes = 10000 * 17088; // 1024 * 1024;
+    const char* IP_addr = "10.253.74.5"; // alveo-build-01
     // const char* IP_addr = "10.253.74.16"; // alveo-u250-02
     // const char* IP_addr = "10.253.74.20"; // alveo-u250-03
-    const char* IP_addr = "10.253.74.24"; // alveo-u250-04
+    // const char* IP_addr = "10.253.74.24"; // alveo-u250-04
 
 
     std::thread th0(thread_send_packets, IP_addr, port, send_bytes);

@@ -34,8 +34,7 @@
 #define SEND_PKG_SIZE 1024 // 1024 
 #define RECV_PKG_SIZE 4096 // 1024
 
-#define DEBUG
-// #define PAD // pad result size to 2048
+// #define DEBUG
 
 
 template <typename T>
@@ -154,10 +153,6 @@ int main(int argc, char const *argv[])
     size_t size_results_dist = TOPK * 32 % 512 == 0?
         TOPK * 32 / 512 : TOPK * 32 / 512 + 1;
     size_t size_results = 1 + size_results_vec_ID + size_results_dist; // in 512-bit packet
-#ifdef PAD
-    size_t size_results_padded = 32;
-    size_results = size_results_padded;
-#endif
     size_t out_bytes = num_FPGA * query_num * 64 * size_results;
     int recv_bytes_per_query = 64 * size_results;
 
