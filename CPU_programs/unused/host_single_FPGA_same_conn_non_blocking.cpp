@@ -1,14 +1,11 @@
-// host_multi_thread: the complete implementation for multiple FPGA
-//   per FPGA, there are 2 threads, 1 for sending query, 1 for receiving results
-//   and an additional thread for HNSW index search
+// host_single_FPGA: the complete implementation for single FPGA
+//   2 thread, 1 for sending query, 1 for receiving results
 //   the cells to scan can either be selected using HNSW or brute-force scan
 //   the cells to scan is computed at query time
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-//  "Usage: " << argv[0] << "<num_FPGA> <Tx (FPGA) IP_addr (num_FPGA))> <Tx send_port (num_FPGA)> <Rx recv_port (num_FPGA)> <SEND_RECV_GAP (0~N, == batch size - 1)> <nprobe>" 
-// e.g. 1 FPGA: ./host_multi_thread 1 10.253.74.12 8881 5001 0 32
-// e.g. 2 FPGA: ./host_multi_thread 2 10.253.74.12 10.253.74.16 8881 8882 5001 5002 0 32
-// e.g. 4 FPGA: ./host_multi_thread 4 10.253.74.12 10.253.74.16 10.253.74.20 10.253.74.24 8881 8882 8883 8884 5001 5002 5003 5004 0 32
+// Usage (e.g.): ./host_single_FPGA_same_conn_non_blocking 10.253.74.24 5001 1 32
+//  "Usage: " << argv[0] << " <Tx (FPGA) IP_addr>  <Rx & Tx port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
@@ -26,16 +23,18 @@
 #include <cassert>
 #include <algorithm>
 
-#include "./hnswlib/hnswlib.h"
+#include "hnswlib/hnswlib.h"
 
 #define D 128
 #define TOPK 100
 
-#define SEND_PKG_SIZE 1024 // 1024 
+#define SEND_PKG_SIZE 4096 // 1024 
 #define RECV_PKG_SIZE 4096 // 1024
 
-// #define DEBUG
+#define DEBUG
 
+int sock = 0;
+int recv_begin = false;
 
 template <typename T>
 struct aligned_allocator
@@ -62,65 +61,58 @@ std::string dir_concat(std::string dir1, std::string dir2) {
     return dir1 + dir2;
 }
 
-void thread_HNSW(
-    int query_num, int nprobe, 
-    float* query_vectors_ptr, float* vector_quantizer_ptr, 
-    hnswlib::AlgorithmInterface<float>* alg_hnswlib,
-    int num_FPGA, int send_recv_query_gap, 
-    int* start_send, int* finish_recv_query_id, int* finish_hnsw_id,
-    char* FPGA_input,
-    std::chrono::system_clock::time_point* query_start_time_ptr);
 
 void thread_send_packets(
-    const char* IP_addr, unsigned int send_port, 
-    int num_FPGA, int thread_id, int query_num, int nprobe, int send_bytes_per_query,
-    char* FPGA_input, int* finish_hnsw_id, int* finish_send_query_id, int* start_recv, int* start_send);
+    const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
+    float* query_vectors_ptr, float* vector_quantizer_ptr, 
+    hnswlib::AlgorithmInterface<float>* alg_hnswlib,
+    int send_recv_query_gap, int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_start_time_ptr); 
 
 void thread_recv_packets(
-    unsigned int recv_port, int num_FPGA, int thread_id, int query_num, int recv_bytes_per_query, char* out_buf,
-    int* start_recv, int* finish_send_query_id, int* finish_recv_query_id);
-
-void thread_result_gather(
-    int num_FPGA, int query_num, int*finish_recv_query_id,
-    std::chrono::system_clock::time_point* query_finish_time_ptr);
+    int query_num, int recv_bytes_per_query, char* out_buf,
+    int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_finish_time_ptr); 
+    
 
 int main(int argc, char const *argv[]) 
 { 
     //////////     Parameter Init     //////////
     
-    std::cout << "Usage: " << argv[0] << "<num_FPGA> <Tx (FPGA) IP_addr (num_FPGA))> <Tx send_port (num_FPGA)> <Rx recv_port (num_FPGA)> <SEND_RECV_GAP (0~N, == batch size - 1)> <nprobe>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <<Rx & Tx port> <SEND_RECV_GAP (1~N, similar to batch size)> <nprobe>" << std::endl;
 
-    int arg_count = 1;
-    unsigned int num_FPGA = 1;
-    num_FPGA = strtol(argv[arg_count++], NULL, 10);
-    
-    const char* IP_addr[num_FPGA];
-    for (int i = 0; i < num_FPGA; i++) {
-        IP_addr[i] = argv[arg_count++];
+    const char* IP_addr;
+    if (argc >= 2)
+    {
+        IP_addr = argv[1];
+    } else {
+        // IP_addr = "10.253.74.5"; // alveo-build-01
+        // IP_addr = "10.253.74.16"; // alveo-u250-02
+        // IP_addr = "10.253.74.20"; // alveo-u250-03
+        IP_addr = "10.253.74.24"; // alveo-u250-04
     }
-    // IP_addr = "10.253.74.5"; // alveo-build-01
-    // IP_addr = "10.253.74.16"; // alveo-u250-02
-    // IP_addr = "10.253.74.20"; // alveo-u250-03
-    // IP_addr = "10.253.74.24"; // alveo-u250-04
 
-    unsigned int send_port[num_FPGA] = { 8888 };
-    for (int i = 0; i < num_FPGA; i++) {
-        send_port[i] = strtol(argv[arg_count++], NULL, 10);
-    } 
-
-    unsigned int recv_port[num_FPGA] = { 5001 };
-    for (int i = 0; i < num_FPGA; i++) {
-        recv_port[i] = strtol(argv[arg_count++], NULL, 10);
+    unsigned int send_port = 5001;
+    if (argc >= 3)
+    {
+        send_port = strtol(argv[2], NULL, 10);
     } 
     
     // how many queries are allow to send ahead of receiving results
     // e.g., when send_recv_query_gap = 1, query 2 can be sent without receiving result 1
-    // e.g., when send_recv_query_gap = 0, result 1 must be received before query 2 can be sent
-    int send_recv_query_gap = 0;
-    send_recv_query_gap = strtol(argv[arg_count++], NULL, 10);
+    // e.g., when send_recv_query_gap = 0, result 1 must be received before query 2 can be sent, 
+    //          but might lead to a deadlock
+    int send_recv_query_gap = 1;
+    if (argc >= 4)
+    {
+        send_recv_query_gap = strtol(argv[3], NULL, 10);
+    } 
 
     size_t nprobe = 1;
-    nprobe = strtol(argv[arg_count++], NULL, 10);
+    if (argc >= 5)
+    {
+        nprobe = strtol(argv[4], NULL, 10);
+    } 
 
     std::string db_name = "SIFT1000M"; // SIFT100M or SIFT1000M
     std::cout << "DB name: " << db_name << std::endl;
@@ -134,16 +126,6 @@ int main(int argc, char const *argv[])
 
     assert (nprobe <= nlist);
 
-    // in runtime (should from network) in 512-bit packet
-    size_t size_header = 1;
-    size_t size_cell_IDs = nprobe * 4 % 64 == 0? nprobe * 4 / 64: nprobe * 4 / 64 + 1;
-    size_t size_query_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
-    size_t size_center_vector = D * 4 % 64 == 0? D * 4 / 64: D * 4 / 64 + 1; 
-
-    size_t FPGA_input_bytes = query_num * 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
-    int send_bytes_per_query = 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
-    std::cout << "send_bytes_per_query: " << send_bytes_per_query << std::endl;
-    std::vector<char ,aligned_allocator<char >> FPGA_input(FPGA_input_bytes);
 
     // out
     // 128 is a random padding for network headers
@@ -153,7 +135,8 @@ int main(int argc, char const *argv[])
     size_t size_results_dist = TOPK * 32 % 512 == 0?
         TOPK * 32 / 512 : TOPK * 32 / 512 + 1;
     size_t size_results = 1 + size_results_vec_ID + size_results_dist; // in 512-bit packet
-    size_t out_bytes = num_FPGA * query_num * 64 * size_results;
+
+    size_t out_bytes = query_num * 64 * size_results;
     int recv_bytes_per_query = 64 * size_results;
 
     std::cout << "recv_bytes_per_query: " << recv_bytes_per_query << std::endl;
@@ -333,54 +316,28 @@ int main(int argc, char const *argv[])
     //////////     Networking Part     //////////
 
     // inter-thread communication by shared memory
-    int start_recv[num_FPGA] = { 0 }; // turns to 1 once recv conn opens, then send thread build conn
-    int start_send[num_FPGA] = { 0 }; // turns to 1 once send conn opens, then HNSW thread starts
-    int finish_hnsw_id = -1; // produced by HNSW thread, consumed by send thread
-    int finish_send_query_id[num_FPGA] = { -1 }; //produced by send threads, consumed by recv thread
-    int finish_recv_query_id[num_FPGA] = { -1 }; //produced by recv threads, consumed by HNSW thread
-
+    // inter-thread communication by shared memory
+    int start_recv = 0; 
+    int finish_recv_query_id = -1;
 
     // profiler
     std::vector<std::chrono::system_clock::time_point> query_start_time(query_num);
     std::vector<std::chrono::system_clock::time_point> query_finish_time(query_num);
 
-
-    // HNSW
-    std::thread t_HNSW(
-        thread_HNSW,
-        query_num, nprobe, 
+    std::thread t_send(
+        thread_send_packets, IP_addr, send_port, query_num, nprobe,
         query_vectors.data(), vector_quantizer.data(), alg_hnswlib,
-        num_FPGA, send_recv_query_gap, 
-        (int*) start_send, (int*) finish_recv_query_id, &finish_hnsw_id,
-        FPGA_input.data(),
+        send_recv_query_gap, &start_recv, &finish_recv_query_id,
         query_start_time.data());
 
-    // send
-    std::thread t_send[4];
-    for (int i = 0; i < num_FPGA; i++) {
-        t_send[i] = std::thread(
-            thread_send_packets, 
-            IP_addr[i], send_port[i], num_FPGA, i, query_num, nprobe, send_bytes_per_query,
-            FPGA_input.data(), &finish_hnsw_id, (int*) finish_send_query_id, (int*) start_recv, (int*) start_send);
-    }
+    sleep(1);
 
-    // recv
-    std::thread t_recv[4];
-    for (int i = 0; i < num_FPGA; i++) {
-        t_recv[i] = std::thread(
-            thread_recv_packets, 
-            recv_port[i], num_FPGA, i, query_num, recv_bytes_per_query, out_buf,
-            (int*) start_recv, (int*) finish_send_query_id, (int*) finish_recv_query_id);
-    }
+    std::thread t_recv(
+        thread_recv_packets, query_num, recv_bytes_per_query, out_buf,
+        &start_recv, &finish_recv_query_id, query_finish_time.data());
 
-    std::thread t_gather(
-        thread_result_gather, num_FPGA, query_num, (int*) finish_recv_query_id, query_finish_time.data());
-
-    // gather results
-    t_HNSW.join();
-    for (int i = 0; i < num_FPGA; i++) { t_send[i].join(); }
-    for (int i = 0; i < num_FPGA; i++) { t_recv[i].join(); }
-    t_gather.join();
+    t_send.join();
+    t_recv.join();
 
     //////////     Performance evaluation    //////////
 
@@ -517,18 +474,82 @@ int main(int argc, char const *argv[])
 } 
 
 
+void thread_recv_packets(
+    int query_num, int recv_bytes_per_query, char* out_buf,
+    int* start_recv, int* finish_recv_query_id,
+    std::chrono::system_clock::time_point* query_finish_time_ptr) { 
 
-void thread_HNSW(
-    int query_num, int nprobe, 
+    printf("Printing recv_port from Thread\n"); 
+
+    // wait for ready
+    volatile int dummy_count = 0;
+    while(!(*start_recv)) { 
+        dummy_count++;
+    }
+
+    ////////////////   Data transfer   ////////////////
+
+    // Should wait until the server said all the data was sent correctly,
+    // otherwise the sender may send packets yet the server did not receive.
+
+    std::chrono::system_clock::time_point start = std::chrono::system_clock::now(); // reset after recving the first query
+
+    for (int query_id = 0; query_id < query_num; query_id++) {
+
+        std::cout << "recv query_id " << query_id << std::endl;
+        int total_recv_bytes = 0;
+        while (total_recv_bytes < recv_bytes_per_query) {
+            int recv_bytes_this_iter = (recv_bytes_per_query - total_recv_bytes) < RECV_PKG_SIZE? (recv_bytes_per_query - total_recv_bytes) : RECV_PKG_SIZE;
+            int recv_bytes = read(sock, out_buf + query_id * recv_bytes_per_query + total_recv_bytes, recv_bytes_this_iter);
+            total_recv_bytes += recv_bytes;
+            
+            if (recv_bytes == -1) {
+                printf("Receiving data UNSUCCESSFUL!\n");
+                return;
+            }
+#ifdef DEBUG
+            else {
+                std::cout << "query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
+            }
+#endif
+            if (recv_bytes > 0) {
+                // set shared register as soon as the first packet of the results is received
+                *finish_recv_query_id = query_id; 
+#ifdef DEBUG
+                std::cout << "set finish_recv_query_id: " << query_id  << std::endl;
+#endif
+            }
+        }
+
+        if (total_recv_bytes != recv_bytes_per_query) {
+            printf("Receiving error, receiving more bytes than a block\n");
+        }
+        if (query_id == 0) {
+            // start counting when the first recv finished
+            start = std::chrono::system_clock::now();
+        }
+        *(query_finish_time_ptr + query_id) = std::chrono::system_clock::now();
+    }
+
+    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
+
+    std::cout << "Recv side Duration (us) = " << durationUs << std::endl;
+    if (query_num > 1) {
+        std::cout << "Recv side QPS () = " << (query_num - 1) / (durationUs / 1000.0 / 1000.0) << std::endl;
+    } 
+    std::cout << "Recv side Finished." << std::endl;
+
+    return; 
+} 
+
+void thread_send_packets(
+    const char* IP_addr, unsigned int send_port, int query_num, int nprobe, 
     float* query_vectors_ptr, float* vector_quantizer_ptr, 
     hnswlib::AlgorithmInterface<float>* alg_hnswlib,
-    int num_FPGA, int send_recv_query_gap, 
-    int* start_send, int* finish_recv_query_id, int* finish_hnsw_id,
-    char* FPGA_input,
+    int send_recv_query_gap, int* start_recv, int* finish_recv_query_id,
     std::chrono::system_clock::time_point* query_start_time_ptr) { 
        
-    printf("Printing from HNSW Thread\n"); 
-
     // in runtime (should from network) in 512-bit packet
     size_t size_header = 1;
     size_t size_cell_IDs = nprobe * 4 % 64 == 0? nprobe * 4 / 64: nprobe * 4 / 64 + 1;
@@ -537,126 +558,10 @@ void thread_HNSW(
 
     size_t FPGA_input_bytes = query_num * 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
     int send_bytes_per_query = 64 * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector);
-
-    std::vector<std::pair <float, int>> dist_array(nprobe); // (dist, cell_ID)
-
-    // wait for send thread to be ready
-    volatile int dummy_count = 0;
-    while (true) { 
-        // wait until all FPGAs are ready before starting
-        bool start = true;
-        for (int i = 0; i < num_FPGA; i++) {
-            if (start_send[i] == 0) {
-                start = false;
-            }
-        }
-        if (start) {
-            break;
-        } else {
-            dummy_count++;
-        }
-    }
-
-    printf("Start running HNSW.\n");
-    ////////////////   Data transfer + Select Cells   ////////////////
-
-    std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
-
-    for (int query_id = 0; query_id < query_num; query_id++) {
-
-        std::cout << "HNSW query_id " << query_id << std::endl;
-
-        *(query_start_time_ptr + query_id) = std::chrono::system_clock::now();
-
-        // select cells to scan
-        size_t start_addr_FPGA_input_per_query = query_id * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector) * 64;
-        size_t start_addr_FPGA_input_cell_ID = start_addr_FPGA_input_per_query + size_header * 64;
-        size_t start_addr_FPGA_input_query_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs) * 64;
-        size_t start_addr_FPGA_input_center_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs + size_query_vector) * 64;
-
-        void* p = query_vectors_ptr + query_id * D;
-        // searchKNN return type: std::priority_queue<std::pair<dist_t, labeltype >>
-        auto gd = alg_hnswlib->searchKnn(p, nprobe);
-        assert(gd.size() == nprobe);
-        int cnt = 0;
-        while (!gd.empty()) {
-            dist_array[cnt] = std::make_pair(gd.top().first, int(gd.top().second));
-            gd.pop();
-            cnt++;
-        }
-
-        // write cell ID
-        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
-            memcpy(&FPGA_input[start_addr_FPGA_input_cell_ID + nprobe_id * sizeof(int)], &dist_array[nprobe_id].second, sizeof(int));
-#ifdef DEBUG
-            // std::cout << "dist: " << dist_array[nprobe_id].first << " cell ID: " << dist_array[nprobe_id].second << "\n";
-#endif
-        } 
-
-        // write query vector
-	    memcpy(&FPGA_input[start_addr_FPGA_input_query_vector], query_vectors_ptr + query_id * D, D * sizeof(float));
-
-        // write center vectors      
-        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
-
-            size_t cell_ID = dist_array[nprobe_id].second;
-	        memcpy(&FPGA_input[start_addr_FPGA_input_center_vector + nprobe_id * D * sizeof(float)], 
-                   vector_quantizer_ptr + cell_ID * D, D * sizeof(float));
-        }        
-
-        *finish_hnsw_id = query_id;
-
-        ///// Wenqi: send several queries in advance
-        volatile int dummy_count = 0;
-        while (true) { 
-            // wait until all FPGAs are ready before starting
-            bool start = true;
-            for (int i = 0; i < num_FPGA; i++) {
-                if (finish_recv_query_id[i] < query_id - send_recv_query_gap) {
-                    start = false;
-                }
-            }
-            if (start) {
-                break;
-            } else {
-                dummy_count++;
-            }
-        }
-    }
-
-    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
-    
-    std::cout << "HNSW side Duration (us) = " << durationUs << std::endl;
-    std::cout << "HNSW side QPS = " << query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
-
-    std::cout << "HNSW side finished." << std::endl;
-    return; 
-} 
-
-void thread_send_packets(
-    const char* IP_addr, unsigned int send_port, 
-    int num_FPGA, int thread_id, int query_num, int nprobe, int send_bytes_per_query,
-    char* FPGA_input, int* finish_hnsw_id, int* finish_send_query_id, int* start_recv, int* start_send) { 
-
-    printf("Printing send_port %d from Thread %d\n", send_port, thread_id); 
-
-    // wait for recv thread to be ready
-    volatile int dummy_count = 0;
-    while (true) { 
-        // wait until all FPGAs are ready before starting
-        bool start = true;
-        for (int i = 0; i < num_FPGA; i++) {
-            if (start_recv[i] == 0) {
-                start = false;
-            }
-        }
-        if (start) {
-            break;
-        } else {
-            dummy_count++;
-        }
-    } 
+    std::cout << "send_bytes_per_query: " << send_bytes_per_query << std::endl;
+    std::vector<char ,aligned_allocator<char >> FPGA_input(FPGA_input_bytes);
+ 
+    printf("Printing send_port from Thread %d\n", send_port); 
     
     int sock = 0; 
     struct sockaddr_in serv_addr; 
@@ -684,22 +589,56 @@ void thread_send_packets(
         printf("\nConnection Failed \n"); 
         return; 
     } 
+    *start_recv = 1; // start recv once send starts
+    printf("Start sending data.\n");
+    ////////////////   Data transfer + Select Cells   ////////////////
 
-    printf("Start sending data send_port %d from Thread %d\n", send_port, thread_id); 
-    start_send[thread_id] = 1;
-    ////////////////   Data transfer   ////////////////
+
+    std::vector<std::pair <float, int>> dist_array(nprobe); // (dist, cell_ID)
 
     std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
 
     for (int query_id = 0; query_id < query_num; query_id++) {
 
-        volatile int dummy_count = 0;
-        // wait for HNSW thread
-        while(*finish_hnsw_id < query_id) {  
-            dummy_count++;
+        std::cout << "send query_id " << query_id << std::endl;
+
+        *(query_start_time_ptr + query_id) = std::chrono::system_clock::now();
+
+        // select cells to scan
+        size_t start_addr_FPGA_input_per_query = query_id * (size_header + size_cell_IDs + size_query_vector + nprobe * size_center_vector) * 64;
+        size_t start_addr_FPGA_input_cell_ID = start_addr_FPGA_input_per_query + size_header * 64;
+        size_t start_addr_FPGA_input_query_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs) * 64;
+        size_t start_addr_FPGA_input_center_vector = start_addr_FPGA_input_per_query + (size_header + size_cell_IDs + size_query_vector) * 64;
+
+        void* p = query_vectors_ptr + query_id * D;
+        // searchKNN return type: std::priority_queue<std::pair<dist_t, labeltype >>
+        auto gd = alg_hnswlib->searchKnn(p, nprobe);
+        assert(gd.size() == nprobe);
+        int cnt = 0;
+        while (!gd.empty()) {
+            dist_array[cnt] = std::make_pair(gd.top().first, int(gd.top().second));
+            gd.pop();
+            cnt++;
         }
 
-        std::cout << "thread " << thread_id << " send query_id " << query_id << std::endl;
+        // write cell ID
+        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
+            memcpy(&FPGA_input[start_addr_FPGA_input_cell_ID + nprobe_id * sizeof(int)], &dist_array[nprobe_id].second, sizeof(int));
+#ifdef DEBUG
+            std::cout << "dist: " << dist_array[nprobe_id].first << " cell ID: " << dist_array[nprobe_id].second << "\n";
+#endif
+        } 
+
+        // write query vector
+	    memcpy(&FPGA_input[start_addr_FPGA_input_query_vector], query_vectors_ptr + query_id * D, D * sizeof(float));
+
+        // write center vectors      
+        for (size_t nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
+
+            size_t cell_ID = dist_array[nprobe_id].second;
+	        memcpy(&FPGA_input[start_addr_FPGA_input_center_vector + nprobe_id * D * sizeof(float)], 
+                   vector_quantizer_ptr + cell_ID * D, D * sizeof(float));
+        }        
 
         // send data
         int total_sent_bytes = 0;
@@ -722,159 +661,20 @@ void thread_send_packets(
         if (total_sent_bytes != send_bytes_per_query) {
             printf("Sending error, sending more bytes than a block\n");
         }
-        finish_send_query_id[thread_id] = query_id;
+
+        volatile int dummy_count = 0;
+        ///// Wenqi: send several queries in advance
+        while((*finish_recv_query_id) < query_id - send_recv_query_gap) {  
+            dummy_count++;
+        }
     }
 
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
     
-    std::cout << "Send side thread " << thread_id << " Duration (us) = " << durationUs << std::endl;
-    std::cout << "Send side " << thread_id << " QPS = " << query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
+    std::cout << "Send side Duration (us) = " << durationUs << std::endl;
+    std::cout << "Send side QPS () = " << query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
 
-    std::cout << "Send side " << thread_id << " finished." << std::endl;
+    std::cout << "Send side finished." << std::endl;
     return; 
 } 
-
-
-void thread_recv_packets(
-    unsigned int recv_port, int num_FPGA, int thread_id, int query_num, int recv_bytes_per_query, char* out_buf,
-    int* start_recv, int* finish_send_query_id, int* finish_recv_query_id) { 
-
-    printf("Printing recv_port %d from Thread %d\n", recv_port, thread_id); 
-
-    int server_fd, sock;
-    struct sockaddr_in address;
-    int opt = 1;
-    int addrlen = sizeof(address);
-
-    // Creating socket file descriptor 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR , &opt, sizeof(opt)))
-    {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(recv_port);
-
-    // Forcefully attaching socket to the recv_port 8080 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-    if (listen(server_fd, 3) < 0)
-    {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-    if ((sock = accept(server_fd, (struct sockaddr *)&address,
-                       (socklen_t*)&addrlen))<0)
-    {
-        perror("accept");
-        exit(EXIT_FAILURE);
-    }
-    printf("Successfully built connectionrecv_port %d from Thread %d\n", recv_port, thread_id); 
-    start_recv[thread_id] = 1; // set shared register
-
-
-    printf("Start receiving data recv_port %d from Thread %d\n", recv_port, thread_id); 
-    ////////////////   Data transfer   ////////////////
-
-
-    // Should wait until the server said all the data was sent correctly,
-    // otherwise the sender may send packets yet the server did not receive.
-
-    std::chrono::system_clock::time_point start = std::chrono::system_clock::now(); // reset after recving the first query
-
-    for (int query_id = 0; query_id < query_num; query_id++) {
- 
-        // wait for send thread, if sock begins early then send, it will occupy socket resource,
-        //   and other threads recv might not easy to get in (very slow)
-        volatile int dummy_count = 0;
-        while(finish_send_query_id[thread_id] < query_id) {  
-            dummy_count++;
-        }
-
-        std::cout << "thread " << thread_id << " recv query_id " << query_id << std::endl;
-        int total_recv_bytes = 0;
-        while (total_recv_bytes < recv_bytes_per_query) {
-            int recv_bytes_this_iter = (recv_bytes_per_query - total_recv_bytes) < RECV_PKG_SIZE? (recv_bytes_per_query - total_recv_bytes) : RECV_PKG_SIZE;
-            int recv_bytes = read(sock, out_buf + (num_FPGA * query_id + thread_id) * recv_bytes_per_query + total_recv_bytes, recv_bytes_this_iter);
-            total_recv_bytes += recv_bytes;
-            
-            if (recv_bytes == -1) {
-                printf("Receiving data UNSUCCESSFUL!\n");
-                return;
-            }
-#ifdef DEBUG
-            else {
-                std::cout << "thread " << thread_id << " query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
-            }
-#endif
-//             if (recv_bytes > 0) {
-//                 // set shared register as soon as the first packet of the results is received
-//                 *finish_recv_query_id = query_id; 
-// #ifdef DEBUG
-//                 std::cout << "set finish_recv_query_id: " << query_id  << std::endl;
-// #endif
-//             }
-        }
-        // set shared register as soon as the first packet of the results is received
-        finish_recv_query_id[thread_id] = query_id; 
-
-        if (total_recv_bytes != recv_bytes_per_query) {
-            printf("Receiving error, receiving more bytes than a block\n");
-        }
-        if (query_id == 0) {
-            // start counting when the first recv finished
-            start = std::chrono::system_clock::now();
-        }
-    }
-
-    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
-
-    std::cout << "Recv side " << thread_id << " Duration (us) = " << durationUs << std::endl;
-    if (query_num > 1) {
-        std::cout << "Recv side " << thread_id << " QPS = " << (query_num - 1) / (durationUs / 1000.0 / 1000.0) << std::endl;
-    } 
-    std::cout << "Recv side " << thread_id << " Finished." << std::endl;
-
-    return; 
-} 
-
-void thread_result_gather(
-    int num_FPGA, int query_num, int*finish_recv_query_id,
-    std::chrono::system_clock::time_point* query_finish_time_ptr) {
-    // gather the results per thread
-    // Save the result recv time
-
-
-    for (int query_id = 0; query_id < query_num; query_id++) {
-
-        volatile int dummy_count = 0;
-        while (true) { 
-            // wait until all FPGAs are ready before starting
-            bool start = true;
-            for (int i = 0; i < num_FPGA; i++) {
-                if (finish_recv_query_id[i] < query_id) {
-                    start = false;
-                }
-            }
-            if (start) {
-                break;
-            } else {
-                dummy_count++;
-            }
-        }
-
-        *(query_finish_time_ptr + query_id) = std::chrono::system_clock::now();
-    }
-}

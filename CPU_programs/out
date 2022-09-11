@@ -1,6 +1,0 @@
-Usage: ./result_recv_thread<Rx port>
-recv_bytes_per_query: 1344
-Printing Port from Thread 5001
-Successfully built connection.
-Start receiving data.
-query_id: 0 recv_bytes896

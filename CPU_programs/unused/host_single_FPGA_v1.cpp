@@ -1,10 +1,10 @@
-// host_single_thread_v1: the basic implementation
+// host_single_FPGA_v1: the basic implementation
 //   2 thread, 1 for sending query, 1 for receiving results
 //   compute all cell to scan before the query sending thread (by manual implementation of brute-force scan)
 
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./host_single_thread 10.253.74.24 8881 5001
+// Usage (e.g.): ./host_single_FPGA 10.253.74.24 8881 5001
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
