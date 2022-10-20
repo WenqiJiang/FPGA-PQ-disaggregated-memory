@@ -136,7 +136,7 @@ int main(int argc, char **argv) {
             OCL_CHECK(err,
                       network_kernel = cl::Kernel(program, "network_krnl", &err));
             OCL_CHECK(err,
-                      user_kernel = cl::Kernel(program, "accelerator_Deep_M16", &err));
+                      user_kernel = cl::Kernel(program, "accelerator_SIFT_M32", &err));
             valid_device++;
             break; // we break because we found a valid device
         }
@@ -149,15 +149,15 @@ int main(int argc, char **argv) {
 
     ///////////     Part 2. Load Data     //////////
     
-    std::string db_name = "Deep1000M"; // Deep100M
+    std::string db_name = "SIFT1000M"; // SIFT100M
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string data_dir_prefix;
-    if (db_name == "Deep100M") {
-        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/Deep100M_IVF32768,PQ16";
+    if (db_name == "SIFT100M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT100M_IVF32768,PQ32";
     }
-    else if (db_name == "Deep1000M") {
-        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/Deep1000M_IVF32768,PQ16";
+    else if (db_name == "SIFT1000M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT1000M_IVF32768,PQ32";
     }
     // std::string gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/bigann/gnd/";
 
@@ -276,7 +276,7 @@ int main(int argc, char **argv) {
     if (!nlist_num_vecs_size) std::cout << "nlist_num_vecs_size is 0!";
     nlist_num_vecs_fstream.seekg(0, nlist_num_vecs_fstream.beg);
 
-    std::string product_quantizer_dir_suffix("product_quantizer_float32_16_256_6_raw");
+    std::string product_quantizer_dir_suffix("product_quantizer_float32_32_256_4_raw");
     std::string product_quantizer_dir = dir_concat(data_dir_prefix, product_quantizer_dir_suffix);
     std::ifstream product_quantizer_fstream(
         product_quantizer_dir, 

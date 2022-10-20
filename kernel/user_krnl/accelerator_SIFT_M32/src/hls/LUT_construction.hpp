@@ -187,14 +187,18 @@ void LUT_construction_sub_PE(
             }
 
             for (int k = 0; k < LUT_ENTRY_NUM; k++) {
-#pragma HLS pipeline II=1
-
+#if D <= 128
+    #pragma HLS pipeline II=1 // For small dimensions we can afford to process 128D per cycle
+#elif D <= 256
+    #pragma HLS pipeline II=2 // Save resources
+#else
+    #pragma HLS pipeline II=4 // Save resources
+#endif 
                 // the L1 diff between sub_residual_vector annd sub-quantizers
                 float L1_dist[D/M];
 #pragma HLS array_partition variable=L1_dist complete
 
                     for (int j = 0; j < D / M; j++) {
-#pragma HLS UNROLL
                         L1_dist[j] = sub_residual_vector[j] - sub_product_quantizer[k][j];
                     }
 
@@ -260,11 +264,11 @@ void LUT_construction_wrapper(
         s_product_quantizer_init_sub_PE);
 
     hls::stream<float> s_sub_query_vectors[M];
-#pragma HLS stream variable=s_sub_query_vectors depth=256
+#pragma HLS stream variable=s_sub_query_vectors depth=2
 #pragma HLS array_partition variable=s_sub_query_vectors complete
 
     hls::stream<float> s_sub_center_vectors[M];
-#pragma HLS stream variable=s_sub_center_vectors depth=256
+#pragma HLS stream variable=s_sub_center_vectors depth=2
 #pragma HLS array_partition variable=s_sub_center_vectors complete
 
     query_vector_dispatcher(
@@ -279,7 +283,7 @@ void LUT_construction_wrapper(
         s_sub_center_vectors);
 
     hls::stream<float> s_partial_distance_LUT[M];
-#pragma HLS stream variable=s_partial_distance_LUT depth=256
+#pragma HLS stream variable=s_partial_distance_LUT depth=2
 #pragma HLS array_partition variable=s_partial_distance_LUT complete
 
     for (int m = 0; m < M; m++) {

@@ -264,11 +264,11 @@ void LUT_construction_wrapper(
         s_product_quantizer_init_sub_PE);
 
     hls::stream<float> s_sub_query_vectors[M];
-#pragma HLS stream variable=s_sub_query_vectors depth=2
+#pragma HLS stream variable=s_sub_query_vectors depth=256
 #pragma HLS array_partition variable=s_sub_query_vectors complete
 
     hls::stream<float> s_sub_center_vectors[M];
-#pragma HLS stream variable=s_sub_center_vectors depth=2
+#pragma HLS stream variable=s_sub_center_vectors depth=256
 #pragma HLS array_partition variable=s_sub_center_vectors complete
 
     query_vector_dispatcher(
@@ -283,7 +283,7 @@ void LUT_construction_wrapper(
         s_sub_center_vectors);
 
     hls::stream<float> s_partial_distance_LUT[M];
-#pragma HLS stream variable=s_partial_distance_LUT depth=2
+#pragma HLS stream variable=s_partial_distance_LUT depth=256
 #pragma HLS array_partition variable=s_partial_distance_LUT complete
 
     for (int m = 0; m < M; m++) {
