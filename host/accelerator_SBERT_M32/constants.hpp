@@ -7,8 +7,8 @@
 // #define ITER_NUM_PER_QUERY 10000
 
 // Variables that can be changed & should be set at compile time
-#define D 384
-#define M 64
+#define D 128
+#define M 32
 #define LUT_ENTRY_NUM 256
 
 // Derived & Fixed numbers

@@ -60,6 +60,11 @@ rm host/host
 make exe
 ```
 
+Method 2: compile the kernel, replcae `host/hls_recv_krnl/host.cpp` with the right host file path.
+
+```
+g++ -I.//common/includes/xcl2 -I/home/wejiang/opt/xilinx/xrt/include -I/tools/Xilinx//Vivado/2022.1/include -Wall -O0 -g -std=gnu++14 -DVITIS_PLATFORM=xilinx_u280_xdma_201920_3 -fmessage-length=0 .//common/includes/xcl2/xcl2.cpp host/hls_recv_krnl/host.cpp   -o 'host/host'  -L/home/wejiang/opt/xilinx/xrt/lib -lOpenCL -lpthread  -lrt -lstdc++
+```
 
 #### accelerator_SIFT_M32 / accelerator_Deep_M32
 
@@ -69,15 +74,40 @@ make exe
 
 FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
 
+On FPGA:
 ```
 # For u250-04 from/to alveo-build-01
-./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8888 10.253.74.5 5008 32
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin 10.253.74.24 8881 10.253.74.5 5001 32
 ```
 
-Method 2: compile the kernel, replcae `host/hls_recv_krnl/host.cpp` with the right host file path.
-
+Once the FPGA finish loading data (waiting for Enter to start), start CPU program, then press Enter on FPGA server:
 ```
-g++ -I.//common/includes/xcl2 -I/home/wejiang/opt/xilinx/xrt/include -I/tools/Xilinx//Vivado/2022.1/include -Wall -O0 -g -std=gnu++14 -DVITIS_PLATFORM=xilinx_u280_xdma_201920_3 -fmessage-length=0 .//common/includes/xcl2/xcl2.cpp host/hls_recv_krnl/host.cpp   -o 'host/host'  -L/home/wejiang/opt/xilinx/xrt/lib -lOpenCL -lpthread  -lrt -lstdc++
+cd CPU_programs
+# tune the dataset option in the host program and recompile
+./host_single_FPGA 10.253.74.24 8881 5001 1 32
+```
+
+#### accelerator_SBERT_M64
+
+This is the distributed search version and requires shard specification. 
+
+<host exe> <XCLBIN File 1> <DB_name 2> <shard_ID 3> <local_FPGA_IP 4> <RxPort 5> <TxIP 6> <TxPort 7> <nprobe 8>
+
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001), which might not be available for awhile; the CPU->FPGA side can remain the same**
+
+FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
+
+On FPGA:
+```
+# For u250-04 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin SBERT1000M 0 10.253.74.24 8881 10.253.74.5 5001 32
+```
+
+Once the FPGA finish loading data (waiting for Enter to start), start CPU program, then press Enter on FPGA server:
+```
+cd CPU_programs
+# tune the dataset option in the host program and recompile
+./host_single_FPGA 10.253.74.24 8881 5001 1 32
 ```
 
 #### hls_recv_krnl

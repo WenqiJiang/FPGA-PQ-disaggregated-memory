@@ -1,10 +1,10 @@
-// host_single_FPGA_Deep: the complete implementation for single FPGA
+// host_single_FPGA: the complete implementation for single FPGA
 //   2 thread, 1 for sending query, 1 for receiving results
 //   the cells to scan can either be selected using HNSW or brute-force scan
 //   the cells to scan is computed at query time
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./host_single_FPGA_Deep 10.253.74.24 8881 5001 1 32
+// Usage (e.g.): ./host_single_FPGA 10.253.74.24 8881 5001 1 32
 //  "Usage: " << argv[0] << " <Tx (FPGA) IP_addr> <Tx send_port> <Rx recv_port> <WINDOW_SIZE (1~N, similar to batch size)> <nprobe>
 
 // Client side C/C++ program to demonstrate Socket programming 
@@ -38,9 +38,10 @@ int main(int argc, char const *argv[])
         IP_addr = argv[1];
     } else {
         // IP_addr = "10.253.74.5"; // alveo-build-01
+        IP_addr = "10.253.74.12"; // alveo-u250-01
         // IP_addr = "10.253.74.16"; // alveo-u250-02
         // IP_addr = "10.253.74.20"; // alveo-u250-03
-        IP_addr = "10.253.74.24"; // alveo-u250-04
+        // IP_addr = "10.253.74.24"; // alveo-u250-04
     }
 
     unsigned int send_port = 8888;
@@ -71,34 +72,19 @@ int main(int argc, char const *argv[])
         nprobe = strtol(argv[5], NULL, 10);
     } 
 
-    std::string db_name = "Deep1000M"; // Deep100M or Deep1000M
+    // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M
+    std::string db_name = "SBERT1000M"; 
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string index_scan = "hnsw"; // hnsw or brute-force
     // std::string index_scan = "brute-force"; // hnsw or brute-force
     std::cout << "Index scan: " << index_scan << std::endl;
 
-    size_t query_num = 10000;
-    size_t nlist = 32768;
-
-    assert (nprobe <= nlist);
-
-    // out
-    // 128 is a random padding for network headers
-    // header = 1 pkt
-    size_t size_results_vec_ID = TOPK * 64 % 512 == 0?
-        TOPK * 64 / 512 : TOPK * 64 / 512 + 1;
-    size_t size_results_dist = TOPK * 32 % 512 == 0?
-        TOPK * 32 / 512 : TOPK * 32 / 512 + 1;
-    size_t size_results = 1 + size_results_vec_ID + size_results_dist; // in 512-bit packet
-    size_t out_bytes = query_num * 64 * size_results;
-    int recv_bytes_per_query = 64 * size_results;
-
-    std::cout << "recv_bytes_per_query: " << recv_bytes_per_query << std::endl;
-
     //////////     Data loading / computing Part     //////////
 
     size_t D;
+    size_t query_num;
+    size_t nlist;
     std::string data_dir_prefix;
     std::string raw_gt_vec_ID_suffix_dir;
     std::string raw_gt_dist_suffix_dir;
@@ -121,15 +107,17 @@ int main(int argc, char const *argv[])
             raw_gt_vec_ID_suffix_dir = "idx_1000M.ivecs";
             raw_gt_dist_suffix_dir = "dis_1000M.fvecs";
         }
+        D = 128;
+        query_num = 10000;
+        nlist = 32768;
         gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/bigann/gnd/";
         product_quantizer_dir_suffix = "product_quantizer_float32_32_256_4_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_128_raw";
         vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_128_raw";
-        raw_gt_vec_ID_size = 10000 * 1001 * sizeof(int);
-        raw_gt_dist_size = 10000 * 1001 * sizeof(float);
         len_per_result = 1001;
         result_start_bias = 1;
-        D = 128;
+        raw_gt_vec_ID_size = 10000 * 1001 * sizeof(int);
+        raw_gt_dist_size = 10000 * 1001 * sizeof(float);
     } else if (strncmp(db_name.c_str(), "Deep", 4) == 0) {
         if (db_name == "Deep100M") {
             data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/Deep100M_IVF32768,PQ32";
@@ -141,17 +129,69 @@ int main(int argc, char const *argv[])
             raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
             raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
         }
+        D = 96;
+        query_num = 10000;
+        nlist = 32768;
         gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/deep1b/";
         product_quantizer_dir_suffix = "product_quantizer_float32_32_256_3_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_96_raw";
         vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_96_raw";
-        raw_gt_vec_ID_size = (2 + 10000 * 100) * sizeof(int);
-        raw_gt_dist_size = (2 + 10000 * 100) * sizeof(float);
         len_per_result = 100;
         result_start_bias = 2;
-        D = 96;
+        raw_gt_vec_ID_size = (2 + 10000 * 100) * sizeof(int);
+        raw_gt_dist_size = (2 + 10000 * 100) * sizeof(float);
+    }  else if (strncmp(db_name.c_str(), "SBERT", 5) == 0) {
+        if (db_name == "SBERT1000M") {
+            // if (shard_ID == 0) {
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_0";
+            // } else if (shard_ID == 1) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_1";
+            // }
+            nlist = 32768;
+            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
+            vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_384_raw";
+        }
+        else if (db_name == "SBERT3000M") {
+            // if (shard_ID == 0) {
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_0";
+            // } else if (shard_ID == 1) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_1";
+            // } else if (shard_ID == 2) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_2";
+            // } else if (shard_ID == 3) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_3";
+            // }
+            nlist = 65536;
+            raw_gt_vec_ID_suffix_dir = "gt_idx_3000M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_3000M.fbin";
+            vector_quantizer_dir_suffix = "vector_quantizer_float32_65536_384_raw";
+        }
+        D = 384;
+        query_num = 10000;
+        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/sbert/";
+        product_quantizer_dir_suffix = "product_quantizer_float32_64_256_6_raw";
+        query_vectors_dir_suffix = "query_vectors_float32_10000_384_raw";
+        raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
+        raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
+        len_per_result = 1000;
+        result_start_bias = 2;
     }
 
+    assert (nprobe <= nlist);
+
+    // out
+    // 128 is a random padding for network headers
+    // header = 1 pkt
+    size_t size_results_vec_ID = TOPK * 64 % 512 == 0?
+        TOPK * 64 / 512 : TOPK * 64 / 512 + 1;
+    size_t size_results_dist = TOPK * 32 % 512 == 0?
+        TOPK * 32 / 512 : TOPK * 32 / 512 + 1;
+    size_t size_results = 1 + size_results_vec_ID + size_results_dist; // in 512-bit packet
+    size_t out_bytes = query_num * 64 * size_results;
+    int recv_bytes_per_query = 64 * size_results;
+
+    std::cout << "recv_bytes_per_query: " << recv_bytes_per_query << std::endl;
     ///////////     get data size from disk     //////////
     
     // info used to Select Cells to Scan

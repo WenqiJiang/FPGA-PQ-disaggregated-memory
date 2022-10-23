@@ -67,7 +67,8 @@ int main(int argc, char const *argv[])
     size_t nprobe = 1;
     nprobe = strtol(argv[arg_count++], NULL, 10);
 
-    std::string db_name = "SIFT1000M"; // SIFT100M or SIFT1000M
+    // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M
+    std::string db_name = "SIFT1000M"; 
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string index_scan = "hnsw"; // hnsw or brute-force
@@ -76,6 +77,8 @@ int main(int argc, char const *argv[])
 
 
     size_t D;
+    size_t query_num;
+    size_t nlist;
     std::string data_dir_prefix;
     std::string raw_gt_vec_ID_suffix_dir;
     std::string raw_gt_dist_suffix_dir;
@@ -98,15 +101,17 @@ int main(int argc, char const *argv[])
             raw_gt_vec_ID_suffix_dir = "idx_1000M.ivecs";
             raw_gt_dist_suffix_dir = "dis_1000M.fvecs";
         }
+        D = 128;
+        query_num = 10000;
+        nlist = 32768;
         gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/bigann/gnd/";
         product_quantizer_dir_suffix = "product_quantizer_float32_32_256_4_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_128_raw";
         vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_128_raw";
-        raw_gt_vec_ID_size = 10000 * 1001 * sizeof(int);
-        raw_gt_dist_size = 10000 * 1001 * sizeof(float);
         len_per_result = 1001;
         result_start_bias = 1;
-        D = 128;
+        raw_gt_vec_ID_size = 10000 * 1001 * sizeof(int);
+        raw_gt_dist_size = 10000 * 1001 * sizeof(float);
     } else if (strncmp(db_name.c_str(), "Deep", 4) == 0) {
         if (db_name == "Deep100M") {
             data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/Deep100M_IVF32768,PQ32";
@@ -118,20 +123,55 @@ int main(int argc, char const *argv[])
             raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
             raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
         }
+        D = 96;
+        query_num = 10000;
+        nlist = 32768;
         gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/deep1b/";
         product_quantizer_dir_suffix = "product_quantizer_float32_32_256_3_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_96_raw";
         vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_96_raw";
-        raw_gt_vec_ID_size = (2 + 10000 * 100) * sizeof(int);
-        raw_gt_dist_size = (2 + 10000 * 100) * sizeof(float);
         len_per_result = 100;
         result_start_bias = 2;
-        D = 96;
+        raw_gt_vec_ID_size = (2 + 10000 * 100) * sizeof(int);
+        raw_gt_dist_size = (2 + 10000 * 100) * sizeof(float);
+    }   else if (strncmp(db_name.c_str(), "SBERT", 5) == 0) {
+        if (db_name == "SBERT1000M") {
+            // if (shard_ID == 0) {
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_0";
+            // } else if (shard_ID == 1) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_1";
+            // }
+            nlist = 32768;
+            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
+            vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_384_raw";
+        }
+        else if (db_name == "SBERT3000M") {
+            // if (shard_ID == 0) {
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_0";
+            // } else if (shard_ID == 1) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_1";
+            // } else if (shard_ID == 2) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_2";
+            // } else if (shard_ID == 3) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_3";
+            // }
+            nlist = 65536;
+            raw_gt_vec_ID_suffix_dir = "gt_idx_3000M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_3000M.fbin";
+            vector_quantizer_dir_suffix = "vector_quantizer_float32_65536_384_raw";
+        }
+        D = 384;
+        query_num = 10000;
+        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/sbert/";
+        product_quantizer_dir_suffix = "product_quantizer_float32_64_256_6_raw";
+        query_vectors_dir_suffix = "query_vectors_float32_10000_384_raw";
+        raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
+        raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
+        len_per_result = 1000;
+        result_start_bias = 2;
     }
 
-
-    size_t query_num = 10000;
-    size_t nlist = 32768;
 
     assert (nprobe <= nlist);
 
@@ -332,7 +372,7 @@ int main(int argc, char const *argv[])
         query_start_time.data());
 
     // send
-    std::thread t_send[4];
+    std::thread t_send[num_FPGA];
     for (int i = 0; i < num_FPGA; i++) {
         t_send[i] = std::thread(
             thread_send_packets, 
@@ -341,7 +381,7 @@ int main(int argc, char const *argv[])
     }
 
     // recv
-    std::thread t_recv[4];
+    std::thread t_recv[num_FPGA];
     for (int i = 0; i < num_FPGA; i++) {
         t_recv[i] = std::thread(
             thread_recv_packets, 

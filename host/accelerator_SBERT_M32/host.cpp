@@ -30,26 +30,18 @@ int main(int argc, char **argv) {
 
     //////////     Part 1. Parse the arguments & Program the FPGA     //////////
 
-    if (argc != 9) {
+    if (argc != 7) {
         // Rx bytes = Tx byte (forwarding the data)
-        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <DB_name 2> <shard_ID 3> <local_FPGA_IP 4> <RxPort 5> <TxIP 6> <TxPort 7> <nprobe 8>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5> <nprobe 6>" << std::endl;
         return EXIT_FAILURE;
     }
 
     std::string binaryFile = argv[1];
 
-    std::string db_name = argv[2]; // "SBERT1000M" or SBERT3000M
-    std::cout << "DB name: " << db_name << std::endl;
-
-    int32_t shard_ID = 0; 
-    {
-        shard_ID = strtol(argv[3], NULL, 10);
-    }
-
-    // arg 5
+    // arg 3
     uint32_t local_IP = 0x0A01D498;
     {
-        std::string s = argv[4];
+        std::string s = argv[2];
         std::string delimiter = ".";
         int ip [4];
         size_t pos = 0;
@@ -68,14 +60,14 @@ int main(int argc, char **argv) {
     // Rx
     int32_t basePortRx = 5001; 
     {
-        basePortRx = strtol(argv[5], NULL, 10);
+        basePortRx = strtol(argv[3], NULL, 10);
     }
 
 
     // Tx
     int32_t TxIPAddr = 0x0A01D46E;//alveo0
     {
-        std::string s = argv[6];
+        std::string s = argv[4];
         std::string delimiter = ".";
         int ip [4];
         size_t pos = 0;
@@ -93,12 +85,12 @@ int main(int argc, char **argv) {
 
     int32_t basePortTx = 5002; 
     {
-        basePortTx = strtol(argv[7], NULL, 10);
+        basePortTx = strtol(argv[5], NULL, 10);
     }
 
     size_t nprobe = 1;
     {
-        nprobe = strtol(argv[8], NULL, 10);
+        nprobe = strtol(argv[6], NULL, 10);
     }
 
     auto size = DATA_SIZE;
@@ -144,7 +136,7 @@ int main(int argc, char **argv) {
             OCL_CHECK(err,
                       network_kernel = cl::Kernel(program, "network_krnl", &err));
             OCL_CHECK(err,
-                      user_kernel = cl::Kernel(program, "accelerator_SBERT_M64", &err));
+                      user_kernel = cl::Kernel(program, "accelerator_SIFT_M32", &err));
             valid_device++;
             break; // we break because we found a valid device
         }
@@ -157,50 +149,17 @@ int main(int argc, char **argv) {
 
     ///////////     Part 2. Load Data     //////////
     
+    std::string db_name = "SIFT1000M"; // SIFT100M
+    std::cout << "DB name: " << db_name << std::endl;
+    
     std::string data_dir_prefix;
-    std::string raw_gt_vec_ID_suffix_dir;
-    std::string raw_gt_dist_suffix_dir;
-    std::string gnd_dir;
-    std::string product_quantizer_dir_suffix;
-    std::string query_vectors_dir_suffix;
-    std::string vector_quantizer_dir_suffix;
-    size_t raw_gt_vec_ID_size;
-    size_t raw_gt_dist_size;
-    size_t len_per_result; 
-    size_t result_start_bias;
-    if (strncmp(db_name.c_str(), "SBERT", 5) == 0) {
-        if (db_name == "SBERT1000M") {
-            if (shard_ID == 0) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_0";
-            } else if (shard_ID == 1) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_1";
-            }
-            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
-            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
-            vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_384_raw";
-        }
-        else if (db_name == "SBERT3000M") {
-            if (shard_ID == 0) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_0";
-            } else if (shard_ID == 1) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_1";
-            } else if (shard_ID == 2) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_2";
-            } else if (shard_ID == 3) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_3";
-            }
-            raw_gt_vec_ID_suffix_dir = "gt_idx_3000M.ibin";
-            raw_gt_dist_suffix_dir = "gt_dis_3000M.fbin";
-            vector_quantizer_dir_suffix = "vector_quantizer_float32_65536_384_raw";
-        }
-        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/sbert/";
-        product_quantizer_dir_suffix = "product_quantizer_float32_64_256_6_raw";
-        query_vectors_dir_suffix = "query_vectors_float32_10000_384_raw";
-        raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
-        raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
-        len_per_result = 1000;
-        result_start_bias = 2;
+    if (db_name == "SIFT100M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT100M_IVF32768,PQ32";
     }
+    else if (db_name == "SIFT1000M") {
+        data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SIFT1000M_IVF32768,PQ32";
+    }
+    // std::string gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/bigann/gnd/";
 
     ///////////     get data size from disk     //////////
 
@@ -317,6 +276,7 @@ int main(int argc, char **argv) {
     if (!nlist_num_vecs_size) std::cout << "nlist_num_vecs_size is 0!";
     nlist_num_vecs_fstream.seekg(0, nlist_num_vecs_fstream.beg);
 
+    std::string product_quantizer_dir_suffix("product_quantizer_float32_32_256_4_raw");
     std::string product_quantizer_dir = dir_concat(data_dir_prefix, product_quantizer_dir_suffix);
     std::ifstream product_quantizer_fstream(
         product_quantizer_dir, 
@@ -512,7 +472,7 @@ int main(int argc, char **argv) {
     wait_for_enter("\nPress ENTER to continue after setting up ILA trigger...");
 
     // fixed or calculated network param
-    uint32_t boardNum = 1 + shard_ID;
+    uint32_t boardNum = 1;
     int32_t useConn = 1;
     uint64_t rxByteCnt = in_DRAM_bytes;
     int32_t pkgWordCountTx = 1; // or 64, 16, etc.
