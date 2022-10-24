@@ -156,7 +156,10 @@ int main(int argc, char **argv) {
 
 
     ///////////     Part 2. Load Data     //////////
-    
+   
+    // in init
+    size_t query_num;
+    size_t nlist; 
     std::string data_dir_prefix;
     std::string raw_gt_vec_ID_suffix_dir;
     std::string raw_gt_dist_suffix_dir;
@@ -175,24 +178,27 @@ int main(int argc, char **argv) {
             } else if (shard_ID == 1) {
                 data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF32768,PQ64_2shards/shard_1";
             }
+            nlist = 32768; 
             raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
             raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
             vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_384_raw";
         }
         else if (db_name == "SBERT3000M") {
             if (shard_ID == 0) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_0";
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_0";
             } else if (shard_ID == 1) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_1";
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_1";
             } else if (shard_ID == 2) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_2";
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_2";
             } else if (shard_ID == 3) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_3";
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_3";
             }
+            nlist = 65536; 
             raw_gt_vec_ID_suffix_dir = "gt_idx_3000M.ibin";
             raw_gt_dist_suffix_dir = "gt_dis_3000M.fbin";
             vector_quantizer_dir_suffix = "vector_quantizer_float32_65536_384_raw";
         }
+        query_num = 10000;
         gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/sbert/";
         product_quantizer_dir_suffix = "product_quantizer_float32_64_256_6_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_384_raw";
@@ -331,9 +337,6 @@ int main(int argc, char **argv) {
     std::cout << "Allocating memory...\n";
     auto start_load = std::chrono::high_resolution_clock::now();
 
-    // in init
-    size_t query_num = 10000;
-    size_t nlist = 32768;
 
     assert (nprobe <= nlist);
 

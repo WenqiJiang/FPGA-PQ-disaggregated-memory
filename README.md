@@ -97,17 +97,28 @@ This is the distributed search version and requires shard specification.
 
 FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
 
+##### SBERT 3000 M (4 FPGA)
+
 On FPGA:
 ```
-# For u250-04 from/to alveo-build-01
-./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin SBERT1000M 0 10.253.74.24 8881 10.253.74.5 5001 32
+# Shard 0: u250-01 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin SBERT3000M 0 10.253.74.12 8881 10.253.74.5 5001 32
+
+# Shard 1: u250-02 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin SBERT3000M 1 10.253.74.16 8882 10.253.74.5 5002 32
+
+# Shard 2: u250-03 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin SBERT3000M 2 10.253.74.20 8883 10.253.74.5 5003 32
+
+# Shard 3: u250-04 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin SBERT3000M 3 10.253.74.24 8884 10.253.74.5 5004 32
 ```
 
-Once the FPGA finish loading data (waiting for Enter to start), start CPU program, then press Enter on FPGA server:
+Once the FPGA finish loading data (waiting for Enter to start), start CPU program, then press Enter on all FPGA servers:
 ```
 cd CPU_programs
 # tune the dataset option in the host program and recompile
-./host_single_FPGA 10.253.74.24 8881 5001 1 32
+./host_multi_FPGA 4 10.253.74.12 10.253.74.16 10.253.74.20 10.253.74.24 8881 8882 8883 8884 5001 5002 5003 5004 1 32
 ```
 
 #### hls_recv_krnl

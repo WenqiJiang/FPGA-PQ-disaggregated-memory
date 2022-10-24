@@ -279,7 +279,7 @@ void accelerator_SBERT_M64(
         s_axis_tcp_port_status);
 
     hls::stream<ap_uint<512>> s_kernel_network_in;
-#pragma HLS STREAM variable=s_kernel_network_in depth=2048
+#pragma HLS STREAM variable=s_kernel_network_in depth=4096
 
     // Wenqi-customized recv function, resolve deadlock in the case that
     //   input data rate >> FPGA query processing rate
@@ -344,7 +344,10 @@ void accelerator_SBERT_M64(
 ////////////////////     1. Construct LUT     ////////////////////
 
 
-    hls::stream<distance_LUT_parallel_t> s_distance_LUT[ADC_PE_NUM + 1];
+    hls::stream<distance_LUT_parallel_t> s_distance_LUT_first;
+#pragma HLS stream variable=s_distance_LUT_first depth=512
+
+    hls::stream<distance_LUT_parallel_t> s_distance_LUT[ADC_PE_NUM];
 #pragma HLS stream variable=s_distance_LUT depth=8
 #pragma HLS array_partition variable=s_distance_LUT complete
 // #pragma HLS resource variable=s_distance_LUT core=FIFO_SRL
@@ -358,7 +361,7 @@ void accelerator_SBERT_M64(
     s_query_vectors,
     s_center_vectors,
     // output
-    s_distance_LUT[0]);
+    s_distance_LUT_first);
 
 ////////////////////     2. ADC     ////////////////////
 
@@ -450,8 +453,32 @@ void accelerator_SBERT_M64(
 #pragma HLS array_partition variable=s_PQ_result complete
 // #pragma HLS resource variable=s_PQ_result core=FIFO_SRL
 
+    // PE 0, with longer input FIFO
+#if ADC_DOUBLE_BUF_ENABLE == 0
+        PQ_lookup_computation(
+            query_num, 
+            nprobe,
+            // input streams
+            s_distance_LUT_first,
+            s_PQ_codes[0],
+            s_scanned_entries_every_cell_ADC[0],
+            // output streams
+            s_distance_LUT[0],
+            s_PQ_result[0]);
+#elif ADC_DOUBLE_BUF_ENABLE == 1
+        PQ_lookup_computation_double_buffer(
+            query_num, 
+            nprobe,
+            // input streams
+            s_distance_LUT_first,
+            s_PQ_codes[0],
+            s_scanned_entries_every_cell_ADC[0],
+            // output streams
+            s_distance_LUT[0],
+            s_PQ_result[0]);
+#endif
 
-    for (int s = 0; s < ADC_PE_NUM; s++) {
+    for (int s = 1; s < ADC_PE_NUM; s++) {
 #pragma HLS unroll
 
 #if ADC_DOUBLE_BUF_ENABLE == 0
@@ -459,22 +486,22 @@ void accelerator_SBERT_M64(
             query_num, 
             nprobe,
             // input streams
-            s_distance_LUT[s],
+            s_distance_LUT[s - 1],
             s_PQ_codes[s],
             s_scanned_entries_every_cell_ADC[s],
             // output streams
-            s_distance_LUT[s + 1],
+            s_distance_LUT[s],
             s_PQ_result[s]);
 #elif ADC_DOUBLE_BUF_ENABLE == 1
         PQ_lookup_computation_double_buffer(
             query_num, 
             nprobe,
             // input streams
-            s_distance_LUT[s],
+            s_distance_LUT[s - 1],
             s_PQ_codes[s],
             s_scanned_entries_every_cell_ADC[s],
             // output streams
-            s_distance_LUT[s + 1],
+            s_distance_LUT[s],
             s_PQ_result[s]);
 #endif
     }
@@ -482,7 +509,7 @@ void accelerator_SBERT_M64(
     dummy_distance_LUT_consumer(
         query_num, 
         nprobe,
-        s_distance_LUT[ADC_PE_NUM]);
+        s_distance_LUT[ADC_PE_NUM - 1]);
 
 ////////////////////     3. K-Selection     ////////////////////
 

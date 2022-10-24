@@ -5,14 +5,15 @@
 //   the cells to scan is computed at query time
 
 // Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-//  "Usage: " << argv[0] << "<num_FPGA> <Tx (FPGA) IP_addr (num_FPGA))> <Tx send_port (num_FPGA)> <Rx recv_port (num_FPGA)> <SEND_RECV_GAP (1~N, ~= batch size)> <nprobe>" 
-// e.g. 1 FPGA: ./host_multi_FPGA 1 10.253.74.12 8881 5001 0 32
-// e.g. 2 FPGA: ./host_multi_FPGA 2 10.253.74.12 10.253.74.16 8881 8882 5001 5002 0 32
-// e.g. 4 FPGA: ./host_multi_FPGA 4 10.253.74.12 10.253.74.16 10.253.74.20 10.253.74.24 8881 8882 8883 8884 5001 5002 5003 5004 0 32
+//  "Usage: " << argv[0] << "<num_FPGA> <Tx (FPGA) IP_addr (num_FPGA))> <Tx send_port (num_FPGA)> <Rx recv_port (num_FPGA)> <SEND_RECV_GAP (1~N, window size)> <nprobe>" 
+// e.g. 1 FPGA: ./host_multi_FPGA 1 10.253.74.12 8881 5001 1 32
+// e.g. 2 FPGA: ./host_multi_FPGA 2 10.253.74.12 10.253.74.16 8881 8882 5001 5002 1 32
+// e.g. 4 FPGA: ./host_multi_FPGA 4 10.253.74.12 10.253.74.16 10.253.74.20 10.253.74.24 8881 8882 8883 8884 5001 5002 5003 5004 1 32
 
 // Client side C/C++ program to demonstrate Socket programming 
 #include <stdio.h> 
 #include <stdlib.h> 
+#include <stdint.h> 
 #include <arpa/inet.h> 
 #include <unistd.h> 
 #include <string.h> 
@@ -68,7 +69,7 @@ int main(int argc, char const *argv[])
     nprobe = strtol(argv[arg_count++], NULL, 10);
 
     // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M
-    std::string db_name = "SIFT1000M"; 
+    std::string db_name = "SBERT3000M"; 
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string index_scan = "hnsw"; // hnsw or brute-force
@@ -148,13 +149,13 @@ int main(int argc, char const *argv[])
         }
         else if (db_name == "SBERT3000M") {
             // if (shard_ID == 0) {
-                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_0";
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_0";
             // } else if (shard_ID == 1) {
-            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_1";
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_1";
             // } else if (shard_ID == 2) {
-            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_2";
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_2";
             // } else if (shard_ID == 3) {
-            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT1000M_IVF65536,PQ64_4shards/shard_3";
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/SBERT3000M_IVF65536,PQ64_4shards/shard_3";
             // }
             nlist = 65536;
             raw_gt_vec_ID_suffix_dir = "gt_idx_3000M.ibin";
@@ -244,9 +245,9 @@ int main(int argc, char const *argv[])
     
     // the raw ground truth size is the same for idx_1M.ivecs, idx_10M.ivecs, idx_100M.ivecs
     // recall counts the very first nearest neighbor only
-    size_t gt_vec_ID_size = 10000 * sizeof(int);
-    std::vector<int, aligned_allocator<int>> raw_gt_vec_ID(raw_gt_vec_ID_size / sizeof(int), 0);
-    std::vector<int, aligned_allocator<int>> gt_vec_ID(gt_vec_ID_size / sizeof(int), 0);
+    size_t gt_vec_ID_size = 10000 * sizeof(uint32_t);
+    std::vector<uint32_t, aligned_allocator<uint32_t>> raw_gt_vec_ID(raw_gt_vec_ID_size / sizeof(int), 0);
+    std::vector<uint32_t, aligned_allocator<uint32_t>> gt_vec_ID(gt_vec_ID_size / sizeof(int), 0);
     
     size_t gt_dist_size = 10000 * sizeof(float);
     std::vector<float, aligned_allocator<float>> raw_gt_dist(raw_gt_dist_size / sizeof(float), 0);
@@ -442,19 +443,25 @@ int main(int argc, char const *argv[])
 #endif
 
 
+	// all results
+        std::vector<std::pair<float, long>> hw_result_pair(num_FPGA * TOPK);
+
+	// gathered results
         std::vector<long> hw_result_vec_ID_partial(TOPK, 0);
         std::vector<float> hw_result_dist_partial(TOPK, 0);
-        std::vector<std::pair<float, int>> hw_result_pair(TOPK);
 
-        int start_result_vec_ID_addr = (query_id * size_results + 1) * 64;
-        int start_result_dist_addr = (query_id * size_results + 1 + size_results_vec_ID) * 64;
+	for (int n = 0; n < num_FPGA; n++) {
 
-        // Load data
-        memcpy(&hw_result_vec_ID_partial[0], &out_buf[start_result_vec_ID_addr], 8 * TOPK);
-        memcpy(&hw_result_dist_partial[0], &out_buf[start_result_dist_addr], 4 * TOPK);
-        for (int k = 0; k < TOPK; k++) {
-            hw_result_pair[k] = std::make_pair(hw_result_dist_partial[k], hw_result_vec_ID_partial[k]);
-        }
+            int start_result_vec_ID_addr = ((num_FPGA * query_id + n) * size_results + 1) * 64;
+            int start_result_dist_addr = ((num_FPGA * query_id + n) * size_results + 1 + size_results_vec_ID) * 64;
+
+            // Load data
+            memcpy(&hw_result_vec_ID_partial[0], &out_buf[start_result_vec_ID_addr], 8 * TOPK);
+            memcpy(&hw_result_dist_partial[0], &out_buf[start_result_dist_addr], 4 * TOPK);
+            for (int k = 0; k < TOPK; k++) {
+                hw_result_pair[n * TOPK + k] = std::make_pair(hw_result_dist_partial[k], hw_result_vec_ID_partial[k]);
+            }
+	}
         std::sort(hw_result_pair.begin(), hw_result_pair.end());
         for (int k = 0; k < TOPK; k++) {
             hw_result_dist_partial[k] = hw_result_pair[k].first;
