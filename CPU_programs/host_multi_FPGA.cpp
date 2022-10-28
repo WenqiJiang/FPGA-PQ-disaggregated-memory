@@ -73,7 +73,7 @@ int main(int argc, char const *argv[])
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string index_scan = "hnsw"; // hnsw or brute-force
-    // std::string index_scan = "brute-force"; // hnsw or brute-force
+    // std::string index_scan = "brute_force"; // hnsw or brute-force
     std::cout << "Index scan: " << index_scan << std::endl;
 
 
@@ -167,6 +167,27 @@ int main(int argc, char const *argv[])
         gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/sbert/";
         product_quantizer_dir_suffix = "product_quantizer_float32_64_256_6_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_384_raw";
+        raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
+        raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
+        len_per_result = 1000;
+        result_start_bias = 2;
+    }  else if (strncmp(db_name.c_str(), "GNN", 3) == 0) {
+        if (db_name == "GNN1400M") {
+            // if (shard_ID == 0) {
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/GNN1400M_IVF32768,PQ64_2shards/shard_0";
+            // } else if (shard_ID == 1) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/GNN1400M_IVF32768,PQ64_2shards/shard_1";
+            // }
+            nlist = 32768; 
+            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
+            vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_256_raw";
+        }
+        D = 256;
+        query_num = 10000;
+        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/Marius_GNN/";
+        product_quantizer_dir_suffix = "product_quantizer_float32_64_256_4_raw";
+        query_vectors_dir_suffix = "query_vectors_float32_10000_256_raw";
         raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
         raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
         len_per_result = 1000;
@@ -334,14 +355,17 @@ int main(int argc, char const *argv[])
         }
         else {
             std::cout << "HNSW Index does not exist, creating new index..." << std::endl;
-            size_t ef_construction = 128;
-            alg_hnswlib = new hnswlib::HierarchicalNSW<float>(&space, nlist, ef_construction);
+            size_t M_hnswlib = 64;
+            size_t ef_construction = 800;
+            alg_hnswlib = new hnswlib::HierarchicalNSW<float>(&space, nlist,  M_hnswlib = M_hnswlib, ef_construction = ef_construction);
             std::cout << "Adding data..." << std::endl;
             for (size_t i = 0; i < nlist; ++i) {
                 alg_hnswlib->addPoint(vector_quantizer.data() + D * i, i);
             }
             alg_hnswlib->saveIndex(hnsw_index_dir);
         }
+        ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->setEf(16);
+        std::cout << "ef: " << ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->ef_ << std::endl;
     } else {
         std::cout << "index option does not exists, either brute_force or hnsw" << std::endl;
         exit(1);

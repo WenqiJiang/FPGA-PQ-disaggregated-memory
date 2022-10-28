@@ -3,9 +3,9 @@ CLAGS=-Wall
 LINK = -lpthread
 
 all: FPGA_simulator \
-	host_single_FPGA_SIFT \
 	host_single_FPGA \
 	host_multi_FPGA \
+	hnswlib_recall \
 	hnswlib_save_load_index
 
 
@@ -33,8 +33,8 @@ FPGA_simulator: FPGA_simulator.cpp
 host_single_FPGA: host_single_FPGA.cpp
 	${CC} ${CLAGS} host_single_FPGA.cpp ${LINK} -o host_single_FPGA
 
-host_single_FPGA_SIFT: host_single_FPGA_SIFT.cpp
-	${CC} ${CLAGS} host_single_FPGA_SIFT.cpp ${LINK} -o host_single_FPGA_SIFT
+# host_single_FPGA_SIFT: host_single_FPGA_SIFT.cpp
+# 	${CC} ${CLAGS} host_single_FPGA_SIFT.cpp ${LINK} -o host_single_FPGA_SIFT
 
 host_multi_FPGA: host_multi_FPGA.cpp
 	${CC} ${CLAGS} host_multi_FPGA.cpp ${LINK} -o host_multi_FPGA
@@ -45,6 +45,9 @@ host_multi_FPGA: host_multi_FPGA.cpp
 # host_single_FPGA_same_conn_non_blocking: host_single_FPGA_same_conn_non_blocking.cpp
 # 	${CC} ${CLAGS} host_single_FPGA_same_conn_non_blocking.cpp ${LINK} -o host_single_FPGA_same_conn_non_blocking
 
+hnswlib_recall: hnswlib_recall.cpp
+	${CC} ${CLAGS} hnswlib_recall.cpp ${LINK} -o hnswlib_recall
+
 hnswlib_save_load_index: hnswlib_save_load_index.cpp
 	${CC} ${CLAGS} hnswlib_save_load_index.cpp ${LINK} -o hnswlib_save_load_index
 
@@ -54,5 +57,5 @@ cleanall: clean
 
 clean:
 # rm network_send network_send_slow network_send_per_query network_recv  query_send_thread result_recv_thread 
-	rm FPGA_simulator host_single_FPGA_SIFT host_single_FPGA host_multi_FPGA hnswlib_save_load_index
+	rm FPGA_simulator host_single_FPGA host_multi_FPGA hnswlib_recall hnswlib_save_load_index
 # rm host_single_FPGA_same_conn host_single_FPGA_same_conn_non_blocking

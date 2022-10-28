@@ -20,6 +20,9 @@ void thread_HNSW(
        
     printf("Printing from HNSW Thread\n"); 
 
+    // ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->setEf(64);
+    std::cout << "ef: " << ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->ef_ << std::endl;
+
     // in runtime (should from network) in 512-bit packet
     size_t size_header = 1;
     size_t size_cell_IDs = nprobe * 4 % 64 == 0? nprobe * 4 / 64: nprobe * 4 / 64 + 1;

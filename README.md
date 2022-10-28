@@ -87,6 +87,35 @@ cd CPU_programs
 ./host_single_FPGA 10.253.74.24 8881 5001 1 32
 ```
 
+
+#### accelerator_GNN_M64
+
+This is the distributed search version and requires shard specification. 
+
+<host exe> <XCLBIN File 1> <DB_name 2> <shard_ID 3> <local_FPGA_IP 4> <RxPort 5> <TxIP 6> <TxPort 7> <nprobe 8>
+
+**NOTE: for FPGA->CPU (send), should change ports between executions, as the OS on CPU need time to recycle the port (e.g., run1=5001; run2=5003; run3=5003; run4=5001), which might not be available for awhile; the CPU->FPGA side can remain the same**
+
+FPGA state reset needed between two runs: xbutil reset --device 0000:06:00.1
+
+##### GNN 1400 M (2 FPGA)
+
+On FPGA:
+```
+# Shard 0: u250-01 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin GNN1400M 0 10.253.74.12 8881 10.253.74.5 5001 32
+
+# Shard 1: u250-02 from/to alveo-build-01
+./host/host ./build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin GNN1400M 1 10.253.74.16 8882 10.253.74.5 5002 32
+```
+
+Once the FPGA finish loading data (waiting for Enter to start), start CPU program, then press Enter on all FPGA servers:
+```
+cd CPU_programs
+# tune the dataset option in the host program and recompile
+./host_multi_FPGA 2 10.253.74.12 10.253.74.16 8881 8882 5001 5002 1 32
+```
+
 #### accelerator_SBERT_M64
 
 This is the distributed search version and requires shard specification. 

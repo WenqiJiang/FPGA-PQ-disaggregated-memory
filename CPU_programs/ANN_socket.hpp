@@ -47,6 +47,9 @@ void thread_send_packets(
     }
  
     printf("Printing send_port from Thread %d\n", send_port); 
+
+    // ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->setEf(64);
+    std::cout << "ef: " << ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->ef_ << std::endl;
     
     int sock = 0; 
     struct sockaddr_in serv_addr; 
