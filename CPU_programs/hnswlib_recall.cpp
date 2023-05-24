@@ -31,8 +31,8 @@ int main(int argc, char const *argv[])
 { 
     //////////     Parameter Init     //////////
     
-    // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M
-    std::string db_name = "SBERT3000M"; 
+    // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M or GNN1400M
+    std::string db_name = "GNN1400M"; 
     std::cout << "DB name: " << db_name << std::endl;
     
     // std::string index_scan = "hnsw"; // hnsw or brute-force
@@ -135,6 +135,27 @@ int main(int argc, char const *argv[])
         raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
         len_per_result = 1000;
         result_start_bias = 2;
+    } else if (strncmp(db_name.c_str(), "GNN", 3) == 0) {
+        if (db_name == "GNN1400M") {
+            // if (shard_ID == 0) {
+                data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/GNN1400M_IVF32768,PQ64_2shards/shard_0";
+            // } else if (shard_ID == 1) {
+            //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/GNN1400M_IVF32768,PQ64_2shards/shard_1";
+            // }
+            nlist = 32768; 
+            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
+            vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_256_raw";
+        }
+        D = 256;
+        query_num = 10000;
+        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/MariusGNN/";
+        product_quantizer_dir_suffix = "product_quantizer_float32_64_256_4_raw";
+        query_vectors_dir_suffix = "query_vectors_float32_10000_256_raw";
+        raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
+        raw_gt_dist_size = (10000 * 1000 + 2) * sizeof(float);
+        len_per_result = 1000;
+        result_start_bias = 2;
     }
 
     int nprobe_max = 128;
@@ -230,7 +251,7 @@ int main(int argc, char const *argv[])
         }
         else {
             std::cout << "HNSW Index does not exist, creating new index..." << std::endl;
-            size_t M_hnswlib = 128;
+            size_t M_hnswlib = 256;
             size_t ef_construction = 800;
             alg_hnswlib_hnsw = new hnswlib::HierarchicalNSW<float>(&space, nlist,  M_hnswlib = M_hnswlib, ef_construction = ef_construction);
             std::cout << "Adding data..." << std::endl;
@@ -239,7 +260,7 @@ int main(int argc, char const *argv[])
             }
             alg_hnswlib_hnsw->saveIndex(hnsw_index_dir);
         }
-        ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib_hnsw)->setEf(10);
+        ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib_hnsw)->setEf(256);
         std::cout << "ef: " << ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib_hnsw)->ef_ << std::endl;
     }   
 

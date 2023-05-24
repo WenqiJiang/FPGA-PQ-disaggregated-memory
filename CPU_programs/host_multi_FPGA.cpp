@@ -68,8 +68,8 @@ int main(int argc, char const *argv[])
     size_t nprobe = 1;
     nprobe = strtol(argv[arg_count++], NULL, 10);
 
-    // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M
-    std::string db_name = "SBERT3000M"; 
+    // Deep100M or Deep1000M or SIFT100M or SIFT1000M or SBERT1000M or SBERT3000M or GNN1400M
+    std::string db_name = "GNN1400M"; 
     std::cout << "DB name: " << db_name << std::endl;
     
     std::string index_scan = "hnsw"; // hnsw or brute-force
@@ -179,13 +179,14 @@ int main(int argc, char const *argv[])
             //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/GNN1400M_IVF32768,PQ64_2shards/shard_1";
             // }
             nlist = 32768; 
-            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
-            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
+            raw_gt_vec_ID_suffix_dir = "gt_idx_1400M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_1400M.fbin";
             vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_256_raw";
         }
         D = 256;
-        query_num = 10000;
-        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/Marius_GNN/";
+        // query_num = 10000;
+        query_num = 1000; // the cluster size is skewed, only evaluate the first 1000 queries to reduce time
+        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/MariusGNN/";
         product_quantizer_dir_suffix = "product_quantizer_float32_64_256_4_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_256_raw";
         raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
@@ -364,7 +365,7 @@ int main(int argc, char const *argv[])
             }
             alg_hnswlib->saveIndex(hnsw_index_dir);
         }
-        ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->setEf(16);
+        ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->setEf(256);
         std::cout << "ef: " << ((hnswlib::HierarchicalNSW<float>*) alg_hnswlib)->ef_ << std::endl;
     } else {
         std::cout << "index option does not exists, either brute_force or hnsw" << std::endl;

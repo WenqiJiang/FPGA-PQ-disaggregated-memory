@@ -185,13 +185,14 @@ int main(int argc, char const *argv[])
             //     data_dir_prefix = "/mnt/scratch/wenqi/Faiss_Enzian_U250_index/GNN1400M_IVF32768,PQ64_2shards/shard_1";
             // }
             nlist = 32768; 
-            raw_gt_vec_ID_suffix_dir = "gt_idx_1000M.ibin";
-            raw_gt_dist_suffix_dir = "gt_dis_1000M.fbin";
+            raw_gt_vec_ID_suffix_dir = "gt_idx_1400M.ibin";
+            raw_gt_dist_suffix_dir = "gt_dis_1400M.fbin";
             vector_quantizer_dir_suffix = "vector_quantizer_float32_32768_256_raw";
         }
         D = 256;
-        query_num = 10000;
-        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/Marius_GNN/";
+        // query_num = 10000;
+        query_num = 1000; // the cluster size is skewed, only evaluate the first 1000 queries to reduce time
+        gnd_dir = "/mnt/scratch/wenqi/Faiss_experiments/MariusGNN/";
         product_quantizer_dir_suffix = "product_quantizer_float32_64_256_4_raw";
         query_vectors_dir_suffix = "query_vectors_float32_10000_256_raw";
         raw_gt_vec_ID_size = (10000 * 1000 + 2) * sizeof(int);
