@@ -1,3 +1,5 @@
+#pragma once
+
 template <typename T>
 struct aligned_allocator
 {
@@ -15,17 +17,11 @@ struct aligned_allocator
   }
 };
 
+
 // boost::filesystem does not compile well, so implement this myself
 std::string dir_concat(std::string dir1, std::string dir2) {
     if (dir1.back() != '/') {
         dir1 += '/';
     }
     return dir1 + dir2;
-}
-
-int decode_int(char* input) {
-	// Given an input buffer in char* format, decode a 4-byte int
-	int out;
-	memcpy(&out, input, 4);
-	return out;
 }
