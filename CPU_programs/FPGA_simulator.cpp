@@ -1,13 +1,12 @@
 // FPGA_simulator: simulate the behavior for a single FPGA
 //   2 thread, 1 for sending results, 1 for receiving queries
 
-// Refer to https://github.com/WenqiJiang/FPGA-ANNS-with_network/blob/master/CPU_scripts/unused/network_send.c
-// Usage (e.g.): ./FPGA_simulator 10.253.74.5 5001 8881 32
-//  "Usage: " << argv[0] << " <Tx (CPU) CPU_IP_addr> <Tx send_port> <Rx recv_port> <nprobe>"
+// Usage (e.g.): ./FPGA_simulator 10.253.74.5 5001 8881 128 100
+//  "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx F2C_port> <3 Rx C2F_port> <4 D> <5 TOPK>"
 
 // Network order:
 //   Open host_single_thread (CPU) first
-//   then open FPGA simulator
+//   then open FPGA simulator -> the FPGA will establish socket con for both F2C and C2F threads
 //   FPGA open connection -> CPU recv -> CPU send query -> FPGA recv
 
 // Client side C/C++ program to demonstrate Socket programming 
@@ -28,13 +27,13 @@
 
 #include "utils.hpp"
 
-#define SEND_PKG_SIZE 1024 // 1024 
-#define RECV_PKG_SIZE 4096 // 1024
+#define F2C_PKG_SIZE 1024 // 1024 
+#define C2F_PKG_SIZE 4096 // 1024
 
 class FPGARetriever {
 
 /* 
-	FPGA input (recv) format:
+	FPGA input (C2F) format:
     // Format: foe each query
     // packet 0: header (batch_size, nprobe, terminate)
     //   for the following packets, for each query
@@ -42,7 +41,7 @@ class FPGARetriever {
     // 		packet k~n: query_vectors
     // 		packet n~m: center_vectors
 
-	FPGA output (send) format:
+	FPGA output (F2C) format:
     // Format: for each query
     // packet 0: header (topK)
     // packet 1~k: topK results, including vec_ID (8-byte) array and dist_array (4-byte)
@@ -55,19 +54,20 @@ public:
     const size_t TOPK; 
 
     const char* CPU_IP_addr; 
-	const unsigned int send_port; // FPGA send, CPU receive
-	const unsigned int recv_port; // FPGA recv, CPU send
+	const unsigned int F2C_port; // FPGA send, CPU receive
+	const unsigned int C2F_port; // FPGA recv, CPU send
 	
 	// states during data transfer
-	int finish_recv_query_id;
-	int start_send;
-	int input_batch_ready; // 1 -> ready; then the result sender can start sending
-	int batch_size; // within input header, only valid when input_batch_ready == True
-	int nprobe;		// within input header, only valid when input_batch_ready == True
-	int terminate;	// within input header, only valid when input_batch_ready == True
-	int recv_batch_id;
-	int send_batch_id;
-	int send_batch_finish;
+	int finish_C2F_query_id;
+	int start_F2C;
+	int start_C2F;
+	int C2F_batch_ready; // 1 -> ready; then the result sender can start sending
+	int batch_size; // within C2F header, only valid when C2F_batch_ready == True
+	int nprobe;		// within C2F header, only valid when C2F_batch_ready == True
+	int terminate;	// within C2F header, only valid when C2F_batch_ready == True
+	int C2F_batch_id;
+	int F2C_batch_id;
+	int F2C_batch_finish;
 
 	// TODO: add a batch count, check the info is not from the last batch
 
@@ -79,68 +79,69 @@ public:
 	const size_t byte_AXI = 64; 
 
 	// size in number of 512-bit AXI data packet
-	//   input
-	size_t AXI_size_input_header;
-	size_t AXI_size_cell_IDs;
-	size_t AXI_size_query_vector; 
-	size_t AXI_size_center_vector; 
-	//   results
-	size_t AXI_size_results_header;
-	size_t AXI_size_results_vec_ID;
-	size_t AXI_size_results_dist;
-	size_t AXI_size_results;
+	//   C2F
+	size_t AXI_size_C2F_header;
+	size_t AXI_size_C2F_cell_IDs;
+	size_t AXI_size_C2F_query_vector; 
+	size_t AXI_size_C2F_center_vector; 
+	//   F2C
+	size_t AXI_size_F2C_header;
+	size_t AXI_size_F2C_vec_ID;
+	size_t AXI_size_F2C_dist;
+	size_t AXI_size_F2C;
 
 	// size in bytes
-	size_t bytes_result_per_query;
-	size_t bytes_input_per_query;
+	size_t bytes_F2C_per_query;
+	size_t bytes_C2F_per_query;
 
-	// input & output buffers
-	char* buf_dummy_results; // dummy results to send to CPU, length = single query results
-	char* buf_FPGA_input;
+	// C2F & output buffers
+	char* buf_dummy_F2C; // dummy results to send to CPU, length = single query results
+	char* buf_C2F;
 
 	// constructor
     FPGARetriever(
 		const size_t in_D,
 		const size_t in_TOPK,
 		const char* in_CPU_IP_addr,
-		const unsigned int in_send_port,
-		const unsigned int in_recv_port) :
+		const unsigned int in_F2C_port,
+		const unsigned int in_C2F_port) :
 		D(in_D), TOPK(in_TOPK), CPU_IP_addr(in_CPU_IP_addr), 
-		send_port(in_send_port), recv_port(in_recv_port) {
+		F2C_port(in_F2C_port), C2F_port(in_C2F_port) {
 
-		finish_recv_query_id = -1;
-		start_send = 0;
-		input_batch_ready = -1;
+		finish_C2F_query_id = -1;
+		start_F2C = 0;
+		start_C2F = 0;
+		C2F_batch_ready = -1;
 		batch_size = -1;
 		nprobe = -1;
 		terminate = 0;	
-		recv_batch_id = -1;
-		send_batch_id = -1;
-		send_batch_finish = 1; // set to one to allow first recv iteration run
+		C2F_batch_id = -1;
+		F2C_batch_id = -1;
+		F2C_batch_finish = 1; // set to one to allow first C2F iteration run
 
-		// input sizes
-		AXI_size_input_header = 1;
-		AXI_size_query_vector = D * bit_float % bit_AXI == 0? D * bit_float / bit_AXI : D * bit_float / bit_AXI + 1; 
-		AXI_size_center_vector = D * bit_float % bit_AXI == 0? D * bit_float / bit_AXI : D * bit_float / bit_AXI + 1; 
+		// C2F sizes
+		AXI_size_C2F_header = 1;
+		AXI_size_C2F_query_vector = D * bit_float % bit_AXI == 0? D * bit_float / bit_AXI : D * bit_float / bit_AXI + 1; 
+		AXI_size_C2F_center_vector = D * bit_float % bit_AXI == 0? D * bit_float / bit_AXI : D * bit_float / bit_AXI + 1; 
 
-		// result sizes
-		AXI_size_results_header = 1;
-		AXI_size_results_vec_ID = TOPK * bit_long_int % bit_AXI == 0?
+		// F2C sizes
+		AXI_size_F2C_header = 1;
+		AXI_size_F2C_vec_ID = TOPK * bit_long_int % bit_AXI == 0?
 			TOPK * bit_long_int / bit_AXI : TOPK * bit_long_int / bit_AXI + 1;
-		AXI_size_results_dist = TOPK * bit_float % bit_AXI == 0?
+		AXI_size_F2C_dist = TOPK * bit_float % bit_AXI == 0?
 			TOPK * bit_float / bit_AXI : TOPK * bit_float / bit_AXI + 1;
-		AXI_size_results = AXI_size_results_header + AXI_size_results_vec_ID + AXI_size_results_dist; 
+		AXI_size_F2C = AXI_size_F2C_header + AXI_size_F2C_vec_ID + AXI_size_F2C_dist; 
 
-		bytes_result_per_query = byte_AXI * AXI_size_results;
-		std::cout << "bytes_result_per_query: " << bytes_result_per_query << std::endl;
+		bytes_F2C_per_query = byte_AXI * AXI_size_F2C;
+		std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;
 
-		buf_dummy_results = (char*) malloc(bytes_result_per_query);
-		buf_FPGA_input = (char*) malloc(bytes_input_per_query);
+		buf_dummy_F2C = (char*) malloc(bytes_F2C_per_query);
+		buf_C2F = (char*) malloc(bytes_C2F_per_query);
 	}
 
-	void thread_recv_query() { 
+	void thread_C2F() { 
 
-		printf("Printing recv_port from Thread %d\n", recv_port); 
+		printf("Printing C2F_port from Thread %d\n", C2F_port); 
 
 		int server_fd, sock;
 		struct sockaddr_in address;
@@ -161,9 +162,9 @@ public:
 
 		address.sin_family = AF_INET;
 		address.sin_addr.s_addr = INADDR_ANY;
-		address.sin_port = htons(recv_port);
+		address.sin_port = htons(C2F_port);
 
-		// Forcefully attaching socket to the recv_port 8080 
+		// Forcefully attaching socket to the C2F_port 8080 
 		if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
 		{
 			perror("bind failed");
@@ -182,12 +183,10 @@ public:
 		}
 		printf("Successfully built connection.\n");
 
-		std::cout << "recv sock " << sock << std::endl; 
+		std::cout << "C2F sock " << sock << std::endl; 
+		start_C2F = 1;
 		// wait for ready
-		volatile int dummy_count = 0;
-		while(!start_send) { 
-		    dummy_count++;
-		}
+		while(!start_F2C) {}
 		printf("Start receiving data.\n");
 
 		////////////////   Data transfer   ////////////////
@@ -199,16 +198,16 @@ public:
     	while (true) {
 
 			// wait until the sender finishes the batch
-			while (send_batch_id < recv_batch_id || !send_batch_finish) {}
+			while (F2C_batch_id < C2F_batch_id || !F2C_batch_finish) {}
 
 			// recv batch header 
-			char header_buf[AXI_size_input_header];
-			size_t header_recv_bytes = 0;
-			while (header_recv_bytes < AXI_size_input_header) {
-				int recv_bytes_this_iter = AXI_size_input_header - header_recv_bytes;
-				int recv_bytes = read(sock, header_buf + header_recv_bytes, recv_bytes_this_iter);
-				header_recv_bytes += recv_bytes;
-				if (recv_bytes == -1) {
+			char header_buf[AXI_size_C2F_header];
+			size_t header_C2F_bytes = 0;
+			while (header_C2F_bytes < AXI_size_C2F_header) {
+				int C2F_bytes_this_iter = AXI_size_C2F_header - header_C2F_bytes;
+				int C2F_bytes = read(sock, header_buf + header_C2F_bytes, C2F_bytes_this_iter);
+				header_C2F_bytes += C2F_bytes;
+				if (C2F_bytes == -1) {
 					printf("Receiving data UNSUCCESSFUL!\n");
 					return;
 				}
@@ -216,57 +215,57 @@ public:
 			int batch_size = decode_int(header_buf);
 			int nprobe = decode_int(header_buf + 4);
 			int terminate = decode_int(header_buf + 8);
-			input_batch_ready = 1; // only after decoding the header
-			recv_batch_id++;
+			C2F_batch_ready = 1; // only after decoding the header
+			C2F_batch_id++;
 			if (terminate) {
 				break;
 			}
 
-			AXI_size_cell_IDs = nprobe * bit_int % bit_AXI == 0? nprobe * bit_int / bit_AXI: nprobe * bit_int / bit_AXI + 1;
-			bytes_input_per_query = byte_AXI * (AXI_size_cell_IDs + AXI_size_query_vector + nprobe * AXI_size_center_vector); // not consider header 
+			AXI_size_C2F_cell_IDs = nprobe * bit_int % bit_AXI == 0? nprobe * bit_int / bit_AXI: nprobe * bit_int / bit_AXI + 1;
+			bytes_C2F_per_query = byte_AXI * (AXI_size_C2F_cell_IDs + AXI_size_C2F_query_vector + nprobe * AXI_size_C2F_center_vector); // not consider header 
 
 			// recv the batch 
 			for (int query_id = 0; query_id < batch_size; query_id++) {
 
-				std::cout << "recv query_id " << query_id << std::endl;
-				size_t total_recv_bytes = 0;
-				while (total_recv_bytes < bytes_input_per_query) {
-					int recv_bytes_this_iter = (bytes_input_per_query - total_recv_bytes) < RECV_PKG_SIZE? (bytes_input_per_query - total_recv_bytes) : RECV_PKG_SIZE;
-					int recv_bytes = read(sock, buf_FPGA_input + total_recv_bytes, recv_bytes_this_iter);
-					total_recv_bytes += recv_bytes;
+				std::cout << "C2F query_id " << query_id << std::endl;
+				size_t total_C2F_bytes = 0;
+				while (total_C2F_bytes < bytes_C2F_per_query) {
+					int C2F_bytes_this_iter = (bytes_C2F_per_query - total_C2F_bytes) < C2F_PKG_SIZE? (bytes_C2F_per_query - total_C2F_bytes) : C2F_PKG_SIZE;
+					int C2F_bytes = read(sock, buf_C2F + total_C2F_bytes, C2F_bytes_this_iter);
+					total_C2F_bytes += C2F_bytes;
 					
-					if (recv_bytes == -1) {
+					if (C2F_bytes == -1) {
 						printf("Receiving data UNSUCCESSFUL!\n");
 						return;
 					}
 #ifdef DEBUG
 					else {
-						std::cout << "query_id: " << query_id << " recv_bytes" << total_recv_bytes << std::endl;
+						std::cout << "query_id: " << query_id << " C2F_bytes" << total_C2F_bytes << std::endl;
 					}
 #endif
 				}
 				// set shared register as soon as the first packet of the results is received
-				finish_recv_query_id = query_id; 
+				finish_C2F_query_id = query_id; 
 
-				if (total_recv_bytes != bytes_input_per_query) {
+				if (total_C2F_bytes != bytes_C2F_per_query) {
 					printf("Receiving error, receiving more bytes than a block\n");
 				}
 			}
 
 			// reset state
-			input_batch_ready = -1;
+			C2F_batch_ready = -1;
 			batch_size = -1;
 			nprobe = -1;
 			terminate = 0;	
 		}
 
-		return; // end recv thread
+		return; // end C2F thread
 	} 
 
 
-	void thread_send_results() { 
+	void thread_F2C() { 
 		
-		printf("Printing send_port from Thread %d\n", send_port); 
+		printf("Printing F2C_port from Thread %d\n", F2C_port); 
 
 		int sock = 0; 
 		struct sockaddr_in serv_addr; 
@@ -276,10 +275,10 @@ public:
 			printf("\n Socket creation error \n"); 
 			return; 
 		} 
-		std::cout << "send sock " << sock << std::endl; 
+		std::cout << "F2C sock " << sock << std::endl; 
 	
 		serv_addr.sin_family = AF_INET; 
-		serv_addr.sin_port = htons(send_port); 
+		serv_addr.sin_port = htons(F2C_port); 
 		
 		// Convert IPv4 and IPv6 addresses from text to binary form 
 		//if(inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr)<=0)  
@@ -296,8 +295,9 @@ public:
 			return; 
 		} 
 
-		printf("Start sending data.\n");
-		start_send = 1;
+		start_F2C = 1;
+		while(!start_C2F) {}
+		printf("Start F2C.\n");
 
 		////////////////   Data transfer + Select Cells   ////////////////
 
@@ -305,10 +305,10 @@ public:
     	while (true) {
 
 			// wait the next batch header being decoded
-			while (!input_batch_ready || recv_batch_id <= send_batch_id) {}
+			while (!C2F_batch_ready || C2F_batch_id <= F2C_batch_id) {}
 
-			send_batch_id++;
-			send_batch_finish = 0;
+			F2C_batch_id++;
+			F2C_batch_finish = 0;
 
 			if (terminate) {
 				break;
@@ -316,16 +316,16 @@ public:
 
 			for (int query_id = 0; query_id < batch_size; query_id++) {
 
-				while (query_id > finish_recv_query_id) {}
+				while (query_id > finish_C2F_query_id) {}
 
-				std::cout << "send query_id " << query_id << std::endl;
+				std::cout << "F2C query_id " << query_id << std::endl;
 
 				// send data
 				size_t total_sent_bytes = 0;
 
-				while (total_sent_bytes < bytes_result_per_query) {
-					int send_bytes_this_iter = (bytes_result_per_query - total_sent_bytes) < SEND_PKG_SIZE? (bytes_result_per_query - total_sent_bytes) : SEND_PKG_SIZE;
-					int sent_bytes = send(sock, buf_dummy_results + total_sent_bytes, send_bytes_this_iter, 0);
+				while (total_sent_bytes < bytes_F2C_per_query) {
+					int F2C_bytes_this_iter = (bytes_F2C_per_query - total_sent_bytes) < F2C_PKG_SIZE? (bytes_F2C_per_query - total_sent_bytes) : F2C_PKG_SIZE;
+					int sent_bytes = send(sock, buf_dummy_F2C + total_sent_bytes, F2C_bytes_this_iter, 0);
 					total_sent_bytes += sent_bytes;
 					if (sent_bytes == -1) {
 						printf("Sending data UNSUCCESSFUL!\n");
@@ -337,25 +337,25 @@ public:
 					}
 #endif
 				}
-				if (total_sent_bytes != bytes_result_per_query) {
+				if (total_sent_bytes != bytes_F2C_per_query) {
 					printf("Sending error, sending more bytes than a block\n");
 				}
 			}
 
-			send_batch_finish = 1;
+			F2C_batch_finish = 1;
 		}
 
-		return; // end send thread
+		return; // end F2C thread
 	} 
 
-	void start_recv_send_threads() {
+	void start_C2F_F2C_threads() {
 
 		// start thread with member function: https://stackoverflow.com/questions/10673585/start-thread-with-member-function
-		std::thread t_send(&FPGARetriever::thread_send_results, this);
-		std::thread t_recv(&FPGARetriever::thread_recv_query, this);
+		std::thread t_F2C(&FPGARetriever::thread_F2C, this);
+		std::thread t_C2F(&FPGARetriever::thread_C2F, this);
 
-		t_send.join();
-		t_recv.join();
+		t_F2C.join();
+		t_C2F.join();
 	}
 };
 
@@ -365,7 +365,7 @@ int main(int argc, char const *argv[])
 { 
     //////////     Parameter Init     //////////
     
-    std::cout << "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx send_port> <3 Rx recv_port> <4 D> <5 TOPK>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx F2C_port> <3 Rx C2F_port> <4 D> <5 TOPK>" << std::endl;
 
     const char* CPU_IP_addr;
     if (argc >= 2)
@@ -375,16 +375,16 @@ int main(int argc, char const *argv[])
         CPU_IP_addr = "10.253.74.5"; // alveo-build-01
     }
 
-    unsigned int send_port = 5008; // send out results
+    unsigned int F2C_port = 5008; 
     if (argc >= 3)
     {
-        send_port = strtol(argv[2], NULL, 10);
+        F2C_port = strtol(argv[2], NULL, 10);
     } 
 
-    unsigned int recv_port = 8888; // receive query
+    unsigned int C2F_port = 8888; 
     if (argc >= 4)
     {
-        recv_port = strtol(argv[3], NULL, 10);
+        C2F_port = strtol(argv[3], NULL, 10);
     } 
 
     size_t D = 128;
@@ -404,16 +404,10 @@ int main(int argc, char const *argv[])
 		D,
 		TOPK,
 		CPU_IP_addr,
-		send_port,
-		recv_port);
+		F2C_port,
+		C2F_port);
 
-	retriever.start_recv_send_threads();
-
-	// std::thread t_send(retriever.thread_send_results);
-	// std::thread t_recv(retriever.thread_recv_query);
-
-	// t_send.join();
-	// t_recv.join();
+	retriever.start_C2F_F2C_threads();
 
     return 0; 
 } 
