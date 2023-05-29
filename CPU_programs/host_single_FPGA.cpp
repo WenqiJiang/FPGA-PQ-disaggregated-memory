@@ -67,6 +67,7 @@ public:
     size_t AXI_size_F2C;
 
     // size in bytes
+	size_t bytes_C2F_header;
     size_t bytes_F2C_per_query;
     size_t bytes_C2F_per_query;
 
@@ -110,7 +111,7 @@ public:
         AXI_size_C2F_center_vector = D * bit_float % bit_AXI == 0? D * bit_float / bit_AXI : D * bit_float / bit_AXI + 1; 
         AXI_size_C2F_cell_IDs = nprobe * bit_int % bit_AXI == 0? nprobe * bit_int / bit_AXI: nprobe * bit_int / bit_AXI + 1;
         bytes_C2F_per_query = byte_AXI * (AXI_size_C2F_cell_IDs + AXI_size_C2F_query_vector + nprobe * AXI_size_C2F_center_vector); // not consider header 
-        std::cout << "bytes_C2F_per_query: " << bytes_C2F_per_query << std::endl;
+        std::cout << "bytes_C2F_per_query (exclude 64-byte header): " << bytes_C2F_per_query << std::endl;
 
         // F2C sizes
         AXI_size_F2C_header = 1;
@@ -119,6 +120,7 @@ public:
         AXI_size_F2C_dist = TOPK * bit_float % bit_AXI == 0?
             TOPK * bit_float / bit_AXI : TOPK * bit_float / bit_AXI + 1;
         AXI_size_F2C = AXI_size_F2C_header + AXI_size_F2C_vec_ID + AXI_size_F2C_dist; 
+		bytes_C2F_header = AXI_size_F2C_header * byte_AXI;
         bytes_F2C_per_query = byte_AXI * AXI_size_F2C;
         std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;
 
@@ -175,19 +177,29 @@ public:
         for (int C2F_batch_id = 0; C2F_batch_id < total_batch_num + 1; C2F_batch_id++) {
 
             std::cout << "C2F_batch_id: " << C2F_batch_id << std::endl;
-            volatile int dummy_cnt = 0;
-            while(finish_C2F_query_id > finish_F2C_query_id + window_size) { dummy_cnt++; }
 
-            int batch_size;
-            int nprobe;
+			char buf_header[byte_AXI];
             int terminate = C2F_batch_id == total_batch_num? 1 : 0; 
-            memcpy(buf_C2F, &batch_size, 4);
-            memcpy(buf_C2F + 4, &nprobe, 4);
-            memcpy(buf_C2F + 8, &terminate, 4);
+            memcpy(buf_header, &batch_size, 4);
+            memcpy(buf_header + 4, &nprobe, 4);
+            memcpy(buf_header + 8, &terminate, 4);
+
+			int sent_header_bytes = 0;
+			while (sent_header_bytes < bytes_C2F_header) {
+				int C2F_bytes_this_iter = (bytes_C2F_header - sent_header_bytes) < C2F_PKG_SIZE? (bytes_C2F_header - sent_header_bytes) : C2F_PKG_SIZE;
+				int C2F_bytes = send(sock, &buf_header[sent_header_bytes], C2F_bytes_this_iter, 0);
+				sent_header_bytes += C2F_bytes;
+				if (C2F_bytes == -1) {
+					printf("Sending data UNSUCCESSFUL!\n");
+					return;
+				}
+			}
+			if (terminate) { break; }
 
             for (int query_id = 0; query_id < batch_size; query_id++) {
 
-                std::cout << "C2F query_id " << query_id << std::endl;
+				std::cout << "finish_C2F_query_id: " << finish_C2F_query_id << std::endl;
+				while(finish_C2F_query_id > finish_F2C_query_id + window_size) {}
 
                 query_start_time_array[finish_C2F_query_id + 1] = std::chrono::system_clock::now();
 
@@ -301,23 +313,23 @@ public:
                     }
 #endif
                 }
-                finish_F2C_query_id++; 
 
                 if (total_F2C_bytes != bytes_F2C_per_query) {
                     printf("Receiving error, receiving more bytes than a block\n");
                 }
+                finish_F2C_query_id++; 
                 query_finish_time_array[finish_F2C_query_id] = std::chrono::system_clock::now();
             }
+        }
 
-            std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-            double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
+		std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+		double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
 
-            std::cout << "F2C side Duration (us) = " << durationUs << std::endl;
-            std::cout << "F2C side QPS () = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
-            std::cout << "F2C side Finished." << std::endl;
+		std::cout << "F2C side Duration (us) = " << durationUs << std::endl;
+		std::cout << "F2C side QPS = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
+		std::cout << "F2C side Finished." << std::endl;
 
-            return; 
-        } 
+		return;  
     }
 
     void start_C2F_F2C_threads() {
@@ -368,30 +380,36 @@ int main(int argc, char const *argv[])
     {
         D = strtol(argv[4], NULL, 10);
     } 
+	std::cout << "D: " << D << std::endl;
 
     size_t TOPK = 100;
     if (argc >= 6)
     {
         TOPK = strtol(argv[5], NULL, 10);
     } 
+	std::cout << "TOPK: " << TOPK << std::endl;
 
     int batch_size = 32;
     if (argc >= 7)
     {
         batch_size = strtol(argv[6], NULL, 10);
     } 
+	std::cout << "batch_size: " << batch_size << std::endl;
 
     int total_batch_num = 100;
     if (argc >= 8)
     {
         total_batch_num = strtol(argv[7], NULL, 10);
     } 
+	std::cout << "total_batch_num: " << total_batch_num << std::endl;
 
     int nprobe = 1;
     if (argc >= 9)
     {
         nprobe = strtol(argv[8], NULL, 10);
     } 
+	std::cout << "nprobe: " << nprobe << std::endl;
+
     
     // how many queries are allow to send ahead of receiving results
     // e.g., when window_size = 1, query 2 can be sent without receiving result 1
@@ -402,6 +420,7 @@ int main(int argc, char const *argv[])
     {
         window_size = strtol(argv[9], NULL, 10);
     } 
+	std::cout << "window_size: " << window_size << std::endl;
 
 
     CPUCoordinator cpu_coordinator(
