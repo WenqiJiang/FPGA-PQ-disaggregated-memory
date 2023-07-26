@@ -9,12 +9,10 @@
 // Variables that can be changed & should be set at compile time
 #define D 128
 #define M 32
-#define LUT_CONSTR_SUB_PE_NUM 16 // M must >= LUT_CONSTR_SUB_PE_NUM
 #define LUT_ENTRY_NUM 256
-#define ADC_DOUBLE_BUF_ENABLE 0 // 0 = disable, 1 = enable (might result in P&R failure)
 
 // Derived & Fixed numbers
-#define NLIST_MAX 65536 // 256K centroids at max
+#define NLIST_MAX 262144 // 256K centroids at max
 #define TOPK 100
 #define DDR_BANK_NUM 4
 #define ADC_PE_PER_CHANNEL (512 / 8 / M) // number of vectors per 512-bit AXI interface
@@ -27,7 +25,7 @@
     #define PRIORITY_QUEUE_LEN_L1 15
 #elif M == 32
     #define PRIORITY_QUEUE_LEN_L1 23
-#elif M == 64
+#elif M == 16
     #define PRIORITY_QUEUE_LEN_L1 38
 #endif
 #define PRIORITY_QUEUE_LEN_L2 TOPK

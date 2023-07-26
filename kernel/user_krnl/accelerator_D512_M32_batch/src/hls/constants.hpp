@@ -7,7 +7,7 @@
 // #define ITER_NUM_PER_QUERY 10000
 
 // Variables that can be changed & should be set at compile time
-#define D 128
+#define D 512
 #define M 32
 #define LUT_CONSTR_SUB_PE_NUM 16 // M must >= LUT_CONSTR_SUB_PE_NUM
 #define LUT_ENTRY_NUM 256

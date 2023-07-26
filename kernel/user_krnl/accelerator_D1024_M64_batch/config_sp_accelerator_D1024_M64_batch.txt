@@ -4,7 +4,7 @@ kernel_frequency=140
 # HLS pipeline flush: https://docs.xilinx.com/r/en-US/ug1399-vitis-hls/Flushing-Pipelines
 # Use HLS command in a tcl file: https://docs.xilinx.com/r/en-US/ug1393-vitis-application-acceleration/hls-Options
 # HLS config_compile command: https://docs.xilinx.com/r/en-US/ug1399-vitis-hls/config_compile
-# pre_tcl=kernel/user_krnl/accelerator_SIFT_M32_batch/pipelineConfig.tcl
+# pre_tcl=kernel/user_krnl/accelerator_D1024_M64_batch/pipelineConfig.tcl
 
 [connectivity] 
 
@@ -14,33 +14,33 @@ kernel_frequency=140
 
 slr=cmac_krnl_1:SLR2
 
-sp=accelerator_SIFT_M32_batch_1.meta_data_init:DDR[0]
-sp=accelerator_SIFT_M32_batch_1.PQ_codes_DRAM_0:DDR[0]
-sp=accelerator_SIFT_M32_batch_1.PQ_codes_DRAM_1:DDR[1]
-sp=accelerator_SIFT_M32_batch_1.PQ_codes_DRAM_2:DDR[2]
-sp=accelerator_SIFT_M32_batch_1.PQ_codes_DRAM_3:DDR[3]
-sp=accelerator_SIFT_M32_batch_1.vec_ID_DRAM_0:DDR[0]
-sp=accelerator_SIFT_M32_batch_1.vec_ID_DRAM_1:DDR[1]
-sp=accelerator_SIFT_M32_batch_1.vec_ID_DRAM_2:DDR[2]
-sp=accelerator_SIFT_M32_batch_1.vec_ID_DRAM_3:DDR[3]
+sp=accelerator_D1024_M64_batch_1.meta_data_init:DDR[0]
+sp=accelerator_D1024_M64_batch_1.PQ_codes_DRAM_0:DDR[0]
+sp=accelerator_D1024_M64_batch_1.PQ_codes_DRAM_1:DDR[1]
+sp=accelerator_D1024_M64_batch_1.PQ_codes_DRAM_2:DDR[2]
+sp=accelerator_D1024_M64_batch_1.PQ_codes_DRAM_3:DDR[3]
+sp=accelerator_D1024_M64_batch_1.vec_ID_DRAM_0:DDR[0]
+sp=accelerator_D1024_M64_batch_1.vec_ID_DRAM_1:DDR[1]
+sp=accelerator_D1024_M64_batch_1.vec_ID_DRAM_2:DDR[2]
+sp=accelerator_D1024_M64_batch_1.vec_ID_DRAM_3:DDR[3]
 
-sc=network_krnl_1.m_axis_udp_rx:accelerator_SIFT_M32_batch_1.s_axis_udp_rx
-sc=network_krnl_1.m_axis_udp_rx_meta:accelerator_SIFT_M32_batch_1.s_axis_udp_rx_meta
-sc=network_krnl_1.m_axis_tcp_port_status:accelerator_SIFT_M32_batch_1.s_axis_tcp_port_status
-sc=network_krnl_1.m_axis_tcp_open_status:accelerator_SIFT_M32_batch_1.s_axis_tcp_open_status
-sc=network_krnl_1.m_axis_tcp_notification:accelerator_SIFT_M32_batch_1.s_axis_tcp_notification
-sc=network_krnl_1.m_axis_tcp_rx_meta:accelerator_SIFT_M32_batch_1.s_axis_tcp_rx_meta
-sc=network_krnl_1.m_axis_tcp_rx_data:accelerator_SIFT_M32_batch_1.s_axis_tcp_rx_data
-sc=network_krnl_1.m_axis_tcp_tx_status:accelerator_SIFT_M32_batch_1.s_axis_tcp_tx_status
+sc=network_krnl_1.m_axis_udp_rx:accelerator_D1024_M64_batch_1.s_axis_udp_rx
+sc=network_krnl_1.m_axis_udp_rx_meta:accelerator_D1024_M64_batch_1.s_axis_udp_rx_meta
+sc=network_krnl_1.m_axis_tcp_port_status:accelerator_D1024_M64_batch_1.s_axis_tcp_port_status
+sc=network_krnl_1.m_axis_tcp_open_status:accelerator_D1024_M64_batch_1.s_axis_tcp_open_status
+sc=network_krnl_1.m_axis_tcp_notification:accelerator_D1024_M64_batch_1.s_axis_tcp_notification
+sc=network_krnl_1.m_axis_tcp_rx_meta:accelerator_D1024_M64_batch_1.s_axis_tcp_rx_meta
+sc=network_krnl_1.m_axis_tcp_rx_data:accelerator_D1024_M64_batch_1.s_axis_tcp_rx_data
+sc=network_krnl_1.m_axis_tcp_tx_status:accelerator_D1024_M64_batch_1.s_axis_tcp_tx_status
 
-sc=accelerator_SIFT_M32_batch_1.m_axis_udp_tx:network_krnl_1.s_axis_udp_tx
-sc=accelerator_SIFT_M32_batch_1.m_axis_udp_tx_meta:network_krnl_1.s_axis_udp_tx_meta
-sc=accelerator_SIFT_M32_batch_1.m_axis_tcp_listen_port:network_krnl_1.s_axis_tcp_listen_port
-sc=accelerator_SIFT_M32_batch_1.m_axis_tcp_open_connection:network_krnl_1.s_axis_tcp_open_connection
-sc=accelerator_SIFT_M32_batch_1.m_axis_tcp_close_connection:network_krnl_1.s_axis_tcp_close_connection
-sc=accelerator_SIFT_M32_batch_1.m_axis_tcp_read_pkg:network_krnl_1.s_axis_tcp_read_pkg
-sc=accelerator_SIFT_M32_batch_1.m_axis_tcp_tx_meta:network_krnl_1.s_axis_tcp_tx_meta
-sc=accelerator_SIFT_M32_batch_1.m_axis_tcp_tx_data:network_krnl_1.s_axis_tcp_tx_data
+sc=accelerator_D1024_M64_batch_1.m_axis_udp_tx:network_krnl_1.s_axis_udp_tx
+sc=accelerator_D1024_M64_batch_1.m_axis_udp_tx_meta:network_krnl_1.s_axis_udp_tx_meta
+sc=accelerator_D1024_M64_batch_1.m_axis_tcp_listen_port:network_krnl_1.s_axis_tcp_listen_port
+sc=accelerator_D1024_M64_batch_1.m_axis_tcp_open_connection:network_krnl_1.s_axis_tcp_open_connection
+sc=accelerator_D1024_M64_batch_1.m_axis_tcp_close_connection:network_krnl_1.s_axis_tcp_close_connection
+sc=accelerator_D1024_M64_batch_1.m_axis_tcp_read_pkg:network_krnl_1.s_axis_tcp_read_pkg
+sc=accelerator_D1024_M64_batch_1.m_axis_tcp_tx_meta:network_krnl_1.s_axis_tcp_tx_meta
+sc=accelerator_D1024_M64_batch_1.m_axis_tcp_tx_data:network_krnl_1.s_axis_tcp_tx_data
 
 sc=cmac_krnl_1.axis_net_rx:network_krnl_1.axis_net_rx
 sc=network_krnl_1.axis_net_tx:cmac_krnl_1.axis_net_tx
@@ -52,9 +52,9 @@ sc=network_krnl_1.axis_net_tx:cmac_krnl_1.axis_net_tx
 
 # param=project.writeIntermediateCheckpoints=true
 
-# prop=run.impl_1.strategy=Performance_SpreadSLLs
+prop=run.impl_1.strategy=Performance_SpreadSLLs
 # prop=run.impl_1.strategy=Performance_BalanceSLLs
-prop=run.impl_1.strategy=Congestion_SSI_SpreadLogic_high
+# prop=run.impl_1.strategy=Congestion_SSI_SpreadLogic_high
 
 ### Strategy Performance_SpreadSLL ###
 # A placement variation for SSI devices with tendency to spread SLR crossings horizontally.
