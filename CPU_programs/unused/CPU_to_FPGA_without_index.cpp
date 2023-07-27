@@ -8,9 +8,8 @@
     "<2 + num_FPGA ~ 2 + 2 * num_FPGA - 1 C2F_port> " 
     "<2 + 2 * num_FPGA ~ 2 + 3 * num_FPGA - 1 F2C_port> "
     "<2 + 3 * num_FPGA D> <3 + 3 * num_FPGA TOPK> <4 + 3 * num_FPGA batch_size> "
-    "<5 + 3 * num_FPGA total_batch_num> <6 + 3 * num_FPGA nprobe> <7 + 3 * num_FPGA nlist>"
-    "<8 + 3 * num_FPGA query_window_size> <9 + 3 * num_FPGA batch_window_size>" 
-    "<10 + 3 * num_FPGA enable_index_scan> <11 + 3 * num_FPGA omp_threads>"<< std::endl;
+    "<5 + 3 * num_FPGA total_batch_num> <6 + 3 * num_FPGA nprobe> "
+    "<7 + 3 * num_FPGA query_window_size> <8 + 3 * num_FPGA batch_window_size>" << std::endl;
 
   Single FPGA example:
      ./CPU_to_FPGA 1 10.253.74.24 8881 5001 128 100 32 100 16 10 0
@@ -38,7 +37,6 @@
 #include <vector>
 
 #include "constants.hpp"
-#include "hnswlib_omp/hnswlib.h"
 
 // #define DEBUG // uncomment to activate debug print-statements
 
@@ -68,7 +66,6 @@ public:
   const int total_batch_num; // total number of batches to send
   int total_query_num;       // total number of numbers of queries
   const int nprobe;
-  const int nlist;
   const int query_window_size; // gap between query IDs of C2F and F2C
   const int batch_window_size; // whether enable inter-batch pipeline overlap (0 = low latency; 1 = hgih throughput)
 
@@ -80,17 +77,12 @@ public:
   const unsigned int* F2C_port; // FPGA send, CPU receive
 
   // states during data transfer
-  int start_index; // signal that index thread has finished initialization
   int start_F2C; // signal that F2C thread has finished setup connection
   int start_C2F; // signal that C2F thread has finished setup connection
 
   // semaphores to keep track of how many batches have been sent to FPGA and how many more we can send before the query_window_size is exeeded
-  // used by index thread & F2C thread to control index scan rate:
-  sem_t sem_batch_window_free_slots; // available slots in the batch window, cnt = batch_window_size - (C2F_batch_id - F2C_batch_id)
-  // used by F2C thread & C2F thread to control send rate:
   sem_t sem_query_window_free_slots; // available slots in the query window, cnt = query_window_size - (C2F_query_id - F2C_query_id)
-  // used by index thread & C2F thread to control send rate:
-  sem_t sem_available_batches_to_send; // index scanned, yet not sent batches
+  sem_t sem_batch_window_free_slots; // available slots in the batch window, cnt = batch_window_size - (C2F_batch_id - F2C_batch_id)
 
   unsigned int C2F_send_index;
   unsigned int F2C_rcv_index;
@@ -117,10 +109,6 @@ public:
   // TODO: should no longer be used for signaling
   int terminate;
 
-  // variables used for index scan
-  int enable_index_scan;  
-	int omp_threads;
-
   std::chrono::system_clock::time_point* batch_start_time_array;
   std::chrono::system_clock::time_point* batch_finish_time_array;
   double* batch_duration_ms_array;
@@ -132,24 +120,19 @@ public:
     const int in_batch_size,
     const int in_total_batch_num,
     const int in_nprobe,
-    const int in_nlist,
     const int in_query_window_size,
     const int in_batch_window_size,
     const int in_num_FPGA,
     const char** in_FPGA_IP_addr,
     const unsigned int* in_C2F_port,
-    const unsigned int* in_F2C_port,
-    const int in_enable_index_scan,
-	  const int in_omp_threads) :
+    const unsigned int* in_F2C_port) :
     D(in_D), TOPK(in_TOPK), batch_size(in_batch_size), total_batch_num(in_total_batch_num),
-    nprobe(in_nprobe), nlist(in_nlist), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
-    num_FPGA(in_num_FPGA), FPGA_IP_addr(in_FPGA_IP_addr), C2F_port(in_C2F_port), F2C_port(in_F2C_port), 
-    enable_index_scan(in_enable_index_scan), omp_threads(in_omp_threads) {
+    nprobe(in_nprobe), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
+    num_FPGA(in_num_FPGA), FPGA_IP_addr(in_FPGA_IP_addr), C2F_port(in_C2F_port), F2C_port(in_F2C_port) {
         
     // Initialize internal variables
     total_query_num = batch_size * total_batch_num;
 
-    start_index = 0;  
     start_F2C = 0;
     start_C2F = 0;
     finish_C2F_query_id = -1; 
@@ -162,7 +145,6 @@ public:
     // F2C_batch_finish = 1; // set to one to allow first C2F iteration run
     sem_init(&sem_query_window_free_slots, 0, query_window_size); // 0 = share between threads of a process
     sem_init(&sem_batch_window_free_slots, 0, batch_window_size); // 0 = share between threads of a process
-    sem_init(&sem_available_batches_to_send, 0, 0); // 0 = share between threads of a process
 
     // C2F sizes
     bytes_C2F_header = num_packages::AXI_size_C2F_header * bit_byte_const::byte_AXI;
@@ -190,61 +172,6 @@ public:
     assert (in_num_FPGA < MAX_FPGA_NUM);
   }
 
-  void thread_index_scan() {
-
-    // initialize index
-    std::vector<float> data(nlist * D);
-    std::vector<float> query(batch_size * total_batch_num * D);   
-    hnswlib::L2Space space(D); 
-    hnswlib::AlgorithmInterface<float>* alg_brute  = new hnswlib::BruteforceSearch<float>(&space, nlist);
-    if (enable_index_scan) {
-      std::cout << "Initializing index..." << std::endl;
-      omp_set_num_threads(omp_threads); 
-
-      std::mt19937 rng;
-      rng.seed(47);
-      std::uniform_real_distribution<> distrib;
-      for (size_t i = 0; i < nlist * D; ++i) {
-        data[i] = distrib(rng);
-      }
-      for (size_t i = 0; i < batch_size * total_batch_num * D; ++i) {
-        query[i] = distrib(rng);
-      }
-      for (size_t i = 0; i < nlist; ++i) {
-          alg_brute->addPoint(data.data() + D * i, i);
-      }
-      std::cout << "Index initialized." << std::endl;
-    }
-
-    start_index = 1;
-    while(!start_C2F) {}
-
-    std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
-
-    for (int index_scan_batch_id = 0; index_scan_batch_id < total_batch_num; index_scan_batch_id++) {
-
-      std::cout << "index_scan_batch_id: " << index_scan_batch_id << std::endl;
-      
-      sem_wait(&sem_batch_window_free_slots);
-      batch_start_time_array[index_scan_batch_id] = std::chrono::system_clock::now();
-      if (enable_index_scan) {
-        auto results_batch_serial_queue =
-                  alg_brute->searchKnnBatchParallel(query.data() + index_scan_batch_id * D, nprobe, batch_size);
-        // TODO: put results somewhere
-      }
-      sem_post(&sem_available_batches_to_send);
-	  }
-
-
-    std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
-    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
-    
-    std::cout << "Index scan side Duration (us) = " << durationUs << std::endl;
-    std::cout << "Index scan side QPS () = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
-    std::cout << "Index scan side finished." << std::endl;
-    
-    return; 
-  }
 
   void connect_C2F() {
 
@@ -325,7 +252,6 @@ public:
       
     // wait for ready
     while(!start_F2C) {}
-    while(!start_index) {}
 
     connect_C2F();
 
@@ -373,8 +299,9 @@ public:
         break;
       }
       
-      sem_wait(&sem_available_batches_to_send);
+      sem_wait(&sem_batch_window_free_slots);
 
+      batch_start_time_array[C2F_batch_id] = std::chrono::system_clock::now();
       for (int query_id = 0; query_id < batch_size; query_id++) {
 
         // this semaphore controls that the window size is adhered to
@@ -542,11 +469,9 @@ public:
   void start_C2F_F2C_threads() {
 
     // start thread with member function: https://stackoverflow.com/questions/10673585/start-thread-with-member-function
-    std::thread t_index(&CPUCoordinator::thread_index_scan, this);
     std::thread t_F2C(&CPUCoordinator::thread_F2C, this);
     std::thread t_C2F(&CPUCoordinator::thread_C2F, this);
 
-    t_index.join();
     t_F2C.join();
     t_C2F.join();
   }
@@ -584,14 +509,13 @@ int main(int argc, char const *argv[])
     "<2 + num_FPGA ~ 2 + 2 * num_FPGA - 1 C2F_port> " 
     "<2 + 2 * num_FPGA ~ 2 + 3 * num_FPGA - 1 F2C_port> "
     "<2 + 3 * num_FPGA D> <3 + 3 * num_FPGA TOPK> <4 + 3 * num_FPGA batch_size> "
-    "<5 + 3 * num_FPGA total_batch_num> <6 + 3 * num_FPGA nprobe> <7 + 3 * num_FPGA nlist>"
-    "<8 + 3 * num_FPGA query_window_size> <9 + 3 * num_FPGA batch_window_size>" 
-    "<10 + 3 * num_FPGA enable_index_scan> <11 + 3 * num_FPGA omp_threads>"<< std::endl;
+    "<5 + 3 * num_FPGA total_batch_num> <6 + 3 * num_FPGA nprobe> "
+    "<7 + 3 * num_FPGA query_window_size> <8 + 3 * num_FPGA batch_window_size>" << std::endl;
 
   int argv_cnt = 1;
   int num_FPGA = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "num_FPGA: " << num_FPGA << std::endl;
-  assert(argc == 12 + 3 * num_FPGA);
+  assert(argc == 9 + 3 * num_FPGA);
   assert(num_FPGA <= MAX_FPGA_NUM);
 
   const char* FPGA_IP_addr[num_FPGA];
@@ -632,47 +556,32 @@ int main(int argc, char const *argv[])
   int nprobe = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "nprobe: " << nprobe << std::endl;
 
-  int nlist = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "nlist: " << nlist << std::endl;
     
   // how many queries are allow to send ahead of receiving results
   // e.g., when query_window_size = 1 (which is the min), query 2 cannot be sent without receiving result 1
   //          but might lead to a deadlock
   int query_window_size = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "query_window_size: " << query_window_size << 
-    ", query window size controls the network communication pressure between CPU and FPGA (communication control)" << std::endl;
+  std::cout << "query_window_size: " << query_window_size << std::endl;
   assert (query_window_size >= 1);
 
   // 1 = high-throughput mode, allowing inter-batch pipeline
   // 0 = low latency mode, does not send data before the last batch is finished
   int batch_window_size = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "batch_window_size: " << batch_window_size << 
-    ", batch window size controls how many batches can be computed for index scan in advance (compute control)" << std::endl;
+  std::cout << "batch_window_size: " << batch_window_size << std::endl;
   assert (batch_window_size >= 1);
 
-  // 0 -> no index scan computation
-  // 1 -> enable index scan computation
-  int enable_index_scan = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "enable_index_scan: " << enable_index_scan << std::endl;
-
-  int omp_threads = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "omp_threads: " << omp_threads << std::endl;
-    
   CPUCoordinator cpu_coordinator(
     D,
     TOPK, 
     batch_size,
     total_batch_num,
     nprobe,
-    nlist,
     query_window_size,
     batch_window_size,
     num_FPGA,
     FPGA_IP_addr,
     C2F_port,
-    F2C_port,
-    enable_index_scan,
-    omp_threads);
+    F2C_port);
 
   cpu_coordinator.start_C2F_F2C_threads();
   cpu_coordinator.calculate_latency();

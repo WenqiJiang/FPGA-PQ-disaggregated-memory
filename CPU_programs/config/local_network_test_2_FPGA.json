@@ -1,0 +1,23 @@
+{
+	"num_FPGA" : 2,
+	"CPU_IP_addr" : "127.0.0.1",
+	"FPGA_IP_addr" : 
+		["127.0.0.1",
+		"127.0.0.1"],
+	"C2F_port": 
+		[8881, 
+		8882],
+	"F2C_port":
+		[5001,
+		5002],
+	"D": 128,
+	"TOPK": 100,
+	"batch_size": 32,
+	"total_batch_num": 100,
+	"nprobe": 32,
+	"nlist": 32768,
+	"query_window_size": 100,
+	"batch_window_size": 4,
+	"enable_index_scan": 1,
+	"cpu_cores": 8
+}
