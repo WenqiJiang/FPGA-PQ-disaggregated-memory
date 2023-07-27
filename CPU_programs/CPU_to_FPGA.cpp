@@ -104,6 +104,35 @@ public:
   size_t bytes_F2C_per_query; // expected bytes received per query including header
   size_t bytes_C2F_per_query;
 
+  /* An illustration of the semaphore logics:
+  
+  sem_batch_window_free_slots is used for constraint compute:
+    the index scan computation should not happen much earlier before the last batch is sent to FPGA,
+      controlled by batch_window_size
+
+  uery_window_size is used for constraint communication:
+    the F2C thread should not send much earlier before the last query is sent to FPGA,
+      controlled by query_window_size
+
+  batch_window_size is used to track how many computed batches are not sent to FPGA yet,
+    determining when the C2F thread can fetch data to send
+  
+  ------------------------------
+  |      index scan thread     |      |
+  ------------------------------      |
+    | sem_available_batches_to_send   |
+    v                                 |
+  ------------------------------      |
+  |      C2F thread            |      |  sem_batch_window_free_slots
+  ------------------------------      |
+    | sem_query_window_free_slots     |
+    v                                 |
+  ------------------------------      |
+  |      F2C thread            |      |
+  ------------------------------      v
+  
+  */
+
   // variables used for connections
   int* sock_c2f;
   int* sock_f2c;
@@ -119,7 +148,7 @@ public:
 
   // variables used for index scan
   int enable_index_scan;  
-	int omp_threads;
+  int omp_threads;
 
   std::chrono::system_clock::time_point* batch_start_time_array;
   std::chrono::system_clock::time_point* batch_finish_time_array;
