@@ -2,22 +2,23 @@ CC = g++
 CLAGS=-Wall -std=c++20
 LINK = -lpthread
 
-all: FPGA_simulator.bin \
-	host_single_FPGA.bin \
-	# host_multi_FPGA.bin \
-	# hnswlib_recall.bin \
-	# hnswlib_save_load_index.bin
+all: FPGA_simulator \
+	CPU_to_FPGA \
+	# CPU_to_single_FPGA \
+	# host_multi_FPGA \
+	# hnswlib_recall \
+	# hnswlib_save_load_index
 
 
-FPGA_simulator.bin: FPGA_simulator.cpp
+FPGA_simulator: FPGA_simulator.cpp
 	${CC} ${CLAGS} FPGA_simulator.cpp ${LINK} -o FPGA_simulator
 
-host_single_FPGA.bin: host_single_FPGA.cpp
-	${CC} ${CLAGS} host_single_FPGA.cpp ${LINK} -o host_single_FPGA
+CPU_to_FPGA: CPU_to_FPGA.cpp
+	${CC} ${CLAGS} CPU_to_FPGA.cpp ${LINK} -o CPU_to_FPGA
 
 .PHONY: clean, cleanall
 
 cleanall: clean
 
 clean:
-	rm FPGA_simulator host_single_FPGA
+	rm FPGA_simulator CPU_to_FPGA
