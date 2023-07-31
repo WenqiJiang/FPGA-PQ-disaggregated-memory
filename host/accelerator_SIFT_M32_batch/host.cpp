@@ -30,9 +30,9 @@ int main(int argc, char **argv) {
 
     //////////     Part 1. Parse the arguments & Program the FPGA     //////////
 
-    if (argc != 6) {
+    if (argc != 7) {
         // Rx bytes = Tx byte (forwarding the data)
-        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort (C2F) 3> <TxIP (CPU IP) 4> <TxPort (F2C) 5> <FPGA_board_ID 6" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -88,7 +88,9 @@ int main(int argc, char **argv) {
         basePortTx = strtol(argv[5], NULL, 10);
     }
 
-    auto size = DATA_SIZE;
+    uint32_t boardNum = strtol(argv[6], NULL, 10);
+    
+	auto size = DATA_SIZE;
     
     //Allocate Memory in Host Memory
     auto vector_size_bytes = sizeof(int) * size;
@@ -312,78 +314,78 @@ int main(int argc, char **argv) {
     std::cout << "Loading data from disk...\n";
 
     // PQ codes
-    char* PQ_codes_DRAM_0_char = (char*) malloc(PQ_codes_DRAM_0_size);
-    PQ_codes_DRAM_0_fstream.read(PQ_codes_DRAM_0_char, PQ_codes_DRAM_0_size);
-    if (!PQ_codes_DRAM_0_fstream) {
-            std::cout << "error: only " << PQ_codes_DRAM_0_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&PQ_codes_DRAM_0[0], PQ_codes_DRAM_0_char, PQ_codes_DRAM_0_size);
-    free(PQ_codes_DRAM_0_char);
+    // char* PQ_codes_DRAM_0_char = (char*) malloc(PQ_codes_DRAM_0_size);
+    // PQ_codes_DRAM_0_fstream.read(PQ_codes_DRAM_0_char, PQ_codes_DRAM_0_size);
+    // if (!PQ_codes_DRAM_0_fstream) {
+    //         std::cout << "error: only " << PQ_codes_DRAM_0_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&PQ_codes_DRAM_0[0], PQ_codes_DRAM_0_char, PQ_codes_DRAM_0_size);
+    // free(PQ_codes_DRAM_0_char);
 
-    char* PQ_codes_DRAM_1_char = (char*) malloc(PQ_codes_DRAM_1_size);
-    PQ_codes_DRAM_1_fstream.read(PQ_codes_DRAM_1_char, PQ_codes_DRAM_1_size);
-    if (!PQ_codes_DRAM_1_fstream) {
-            std::cout << "error: only " << PQ_codes_DRAM_1_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&PQ_codes_DRAM_1[0], PQ_codes_DRAM_1_char, PQ_codes_DRAM_1_size);
-    free(PQ_codes_DRAM_1_char);
+    // char* PQ_codes_DRAM_1_char = (char*) malloc(PQ_codes_DRAM_1_size);
+    // PQ_codes_DRAM_1_fstream.read(PQ_codes_DRAM_1_char, PQ_codes_DRAM_1_size);
+    // if (!PQ_codes_DRAM_1_fstream) {
+    //         std::cout << "error: only " << PQ_codes_DRAM_1_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&PQ_codes_DRAM_1[0], PQ_codes_DRAM_1_char, PQ_codes_DRAM_1_size);
+    // free(PQ_codes_DRAM_1_char);
 
-    char* PQ_codes_DRAM_2_char = (char*) malloc(PQ_codes_DRAM_2_size);
-    PQ_codes_DRAM_2_fstream.read(PQ_codes_DRAM_2_char, PQ_codes_DRAM_2_size);
-    if (!PQ_codes_DRAM_2_fstream) {
-            std::cout << "error: only " << PQ_codes_DRAM_2_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&PQ_codes_DRAM_2[0], PQ_codes_DRAM_2_char, PQ_codes_DRAM_2_size);
-    free(PQ_codes_DRAM_2_char);
+    // char* PQ_codes_DRAM_2_char = (char*) malloc(PQ_codes_DRAM_2_size);
+    // PQ_codes_DRAM_2_fstream.read(PQ_codes_DRAM_2_char, PQ_codes_DRAM_2_size);
+    // if (!PQ_codes_DRAM_2_fstream) {
+    //         std::cout << "error: only " << PQ_codes_DRAM_2_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&PQ_codes_DRAM_2[0], PQ_codes_DRAM_2_char, PQ_codes_DRAM_2_size);
+    // free(PQ_codes_DRAM_2_char);
     
-    char* PQ_codes_DRAM_3_char = (char*) malloc(PQ_codes_DRAM_3_size);
-    PQ_codes_DRAM_3_fstream.read(PQ_codes_DRAM_3_char, PQ_codes_DRAM_3_size);
-    if (!PQ_codes_DRAM_3_fstream) {
-            std::cout << "error: only " << PQ_codes_DRAM_3_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&PQ_codes_DRAM_3[0], PQ_codes_DRAM_3_char, PQ_codes_DRAM_3_size);
-    free(PQ_codes_DRAM_3_char);
+    // char* PQ_codes_DRAM_3_char = (char*) malloc(PQ_codes_DRAM_3_size);
+    // PQ_codes_DRAM_3_fstream.read(PQ_codes_DRAM_3_char, PQ_codes_DRAM_3_size);
+    // if (!PQ_codes_DRAM_3_fstream) {
+    //         std::cout << "error: only " << PQ_codes_DRAM_3_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&PQ_codes_DRAM_3[0], PQ_codes_DRAM_3_char, PQ_codes_DRAM_3_size);
+    // free(PQ_codes_DRAM_3_char);
 
-    // vec ID
-    char* vec_ID_DRAM_0_char = (char*) malloc(vec_ID_DRAM_0_size);
-    vec_ID_DRAM_0_fstream.read(vec_ID_DRAM_0_char, vec_ID_DRAM_0_size);
-    if (!vec_ID_DRAM_0_fstream) {
-            std::cout << "error: only " << vec_ID_DRAM_0_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&vec_ID_DRAM_0[0], vec_ID_DRAM_0_char, vec_ID_DRAM_0_size);
-    free(vec_ID_DRAM_0_char);
+    // // vec ID
+    // char* vec_ID_DRAM_0_char = (char*) malloc(vec_ID_DRAM_0_size);
+    // vec_ID_DRAM_0_fstream.read(vec_ID_DRAM_0_char, vec_ID_DRAM_0_size);
+    // if (!vec_ID_DRAM_0_fstream) {
+    //         std::cout << "error: only " << vec_ID_DRAM_0_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&vec_ID_DRAM_0[0], vec_ID_DRAM_0_char, vec_ID_DRAM_0_size);
+    // free(vec_ID_DRAM_0_char);
 
-    char* vec_ID_DRAM_1_char = (char*) malloc(vec_ID_DRAM_1_size);
-    vec_ID_DRAM_1_fstream.read(vec_ID_DRAM_1_char, vec_ID_DRAM_1_size);
-    if (!vec_ID_DRAM_1_fstream) {
-            std::cout << "error: only " << vec_ID_DRAM_1_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&vec_ID_DRAM_1[0], vec_ID_DRAM_1_char, vec_ID_DRAM_1_size);
-    free(vec_ID_DRAM_1_char);
+    // char* vec_ID_DRAM_1_char = (char*) malloc(vec_ID_DRAM_1_size);
+    // vec_ID_DRAM_1_fstream.read(vec_ID_DRAM_1_char, vec_ID_DRAM_1_size);
+    // if (!vec_ID_DRAM_1_fstream) {
+    //         std::cout << "error: only " << vec_ID_DRAM_1_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&vec_ID_DRAM_1[0], vec_ID_DRAM_1_char, vec_ID_DRAM_1_size);
+    // free(vec_ID_DRAM_1_char);
 
-    char* vec_ID_DRAM_2_char = (char*) malloc(vec_ID_DRAM_2_size);
-    vec_ID_DRAM_2_fstream.read(vec_ID_DRAM_2_char, vec_ID_DRAM_2_size);
-    if (!vec_ID_DRAM_2_fstream) {
-            std::cout << "error: only " << vec_ID_DRAM_2_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&vec_ID_DRAM_2[0], vec_ID_DRAM_2_char, vec_ID_DRAM_2_size);
-    free(vec_ID_DRAM_2_char);
+    // char* vec_ID_DRAM_2_char = (char*) malloc(vec_ID_DRAM_2_size);
+    // vec_ID_DRAM_2_fstream.read(vec_ID_DRAM_2_char, vec_ID_DRAM_2_size);
+    // if (!vec_ID_DRAM_2_fstream) {
+    //         std::cout << "error: only " << vec_ID_DRAM_2_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&vec_ID_DRAM_2[0], vec_ID_DRAM_2_char, vec_ID_DRAM_2_size);
+    // free(vec_ID_DRAM_2_char);
     
-    char* vec_ID_DRAM_3_char = (char*) malloc(vec_ID_DRAM_3_size);
-    vec_ID_DRAM_3_fstream.read(vec_ID_DRAM_3_char, vec_ID_DRAM_3_size);
-    if (!vec_ID_DRAM_3_fstream) {
-            std::cout << "error: only " << vec_ID_DRAM_3_fstream.gcount() << " could be read";
-        exit(1);
-    }
-    memcpy(&vec_ID_DRAM_3[0], vec_ID_DRAM_3_char, vec_ID_DRAM_3_size);
-    free(vec_ID_DRAM_3_char);
+    // char* vec_ID_DRAM_3_char = (char*) malloc(vec_ID_DRAM_3_size);
+    // vec_ID_DRAM_3_fstream.read(vec_ID_DRAM_3_char, vec_ID_DRAM_3_size);
+    // if (!vec_ID_DRAM_3_fstream) {
+    //         std::cout << "error: only " << vec_ID_DRAM_3_fstream.gcount() << " could be read";
+    //     exit(1);
+    // }
+    // memcpy(&vec_ID_DRAM_3[0], vec_ID_DRAM_3_char, vec_ID_DRAM_3_size);
+    // free(vec_ID_DRAM_3_char);
 
     // control signals
     // meta_data_init = nlist_PQ_codes_start_addr, nlist_vec_ID_start_addr, nlist_num_vecs,
@@ -442,7 +444,6 @@ int main(int argc, char **argv) {
     wait_for_enter("\nPress ENTER to continue after setting up ILA trigger...");
 
     // fixed or calculated network param
-    uint32_t boardNum = 1;
     int32_t useConn = 1;
     uint64_t rxByteCnt = 1UL << (6 * 8); // 1 << 6 = 64 
     int32_t pkgWordCountTx = 1; // or 64, 16, etc.

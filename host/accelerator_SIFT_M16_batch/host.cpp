@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
 
     if (argc != 6) {
         // Rx bytes = Tx byte (forwarding the data)
-        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort 3> <TxIP 4> <TxPort 5>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort (C2F) 3> <TxIP (CPU IP) 4> <TxPort (F2C) 5> <FPGA_board_ID 6" << std::endl;
         return EXIT_FAILURE;
     }
 

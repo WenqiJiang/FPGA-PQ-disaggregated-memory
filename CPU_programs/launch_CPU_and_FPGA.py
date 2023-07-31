@@ -62,10 +62,39 @@ def dict_to_string(data):
     else:
         return str(data)
 
+def get_board_ID(FPGA_IP_addr):
+	"""
+	Given the IP address, return the boardNum argument passed to the FPGA network stack
+	#   alveo-u250-01: 10.253.74.12
+	#   alveo-u250-02: 10.253.74.16
+	#   alveo-u250-03: 10.253.74.20
+	#   alveo-u250-04: 10.253.74.24
+	#   alveo-u250-05: 10.253.74.28
+	#   alveo-u250-06: 10.253.74.40
+	"""
+	if FPGA_IP_addr == '10.253.74.12':
+		return '1'
+	elif FPGA_IP_addr == '10.253.74.16':
+		return '2'
+	elif FPGA_IP_addr == '10.253.74.20':
+		return '3'
+	elif FPGA_IP_addr == '10.253.74.24':
+		return '4'
+	elif FPGA_IP_addr == '10.253.74.28':
+		return '5'
+	elif FPGA_IP_addr == '10.253.74.40':
+		return '6'
+	else:
+		return None
+
+
 config_file = open(args.config_fname, "r")
 config_dict = yaml.safe_load(config_file)
 config_dict = dict_to_string(config_dict)
 print(config_dict)
+assert int(config_dict['num_FPGA']) == len(config_dict['FPGA_IP_addr'])
+assert int(config_dict['num_FPGA']) == len(config_dict['C2F_port'])
+assert int(config_dict['num_FPGA']) == len(config_dict['F2C_port'])
 
 if mode == 'CPU':
 	"""
@@ -78,6 +107,18 @@ if mode == 'CPU':
     "<8 + 3 * num_FPGA query_window_size> <9 + 3 * num_FPGA batch_window_size>" 
     "<10 + 3 * num_FPGA enable_index_scan> <11 + 3 * num_FPGA omp_threads>"<< std::endl;
 	"""
+
+	# print the FPGA commands if the FPGA is available
+	for i in range(int(config_dict['num_FPGA'])):
+		FPGA_IP_addr = config_dict['FPGA_IP_addr'][i]	
+		if get_board_ID(FPGA_IP_addr) is not None:
+			board_ID = get_board_ID(FPGA_IP_addr)
+			# std::cout << "Usage: " << argv[0] << " <XCLBIN File 1> <local_FPGA_IP 2> <RxPort (C2F) 3> <TxIP (CPU IP) 4> <TxPort (F2C) 5> <FPGA_board_ID 6" << std::endl;
+			print(f'FPGA {i} commands: ')
+			print("./host/host build_dir.hw.xilinx_u250_gen3x16_xdma_4_1_202210_1/network.xclbin "
+				f" {FPGA_IP_addr} {config_dict['C2F_port'][i]} {config_dict['CPU_IP_addr']} {config_dict['F2C_port'][i]} {board_ID}")
+
+	# execute the CPU command
 	cmd = ''
 	cmd += 'taskset --cpu-list 0-{} '.format(config_dict['cpu_cores'])
 	cmd += cpu_exe_dir + ' '

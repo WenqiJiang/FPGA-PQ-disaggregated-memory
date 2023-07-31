@@ -15,7 +15,7 @@ C2F_port: [8881]
 F2C_port: [5001]
 
 # Fixed parameters
-D: 128
+D: 1024
 TOPK: 100
 
 # Tunable parameters at runtime
@@ -26,7 +26,7 @@ nlist: 32768
 
 # query window size controls the communication between CPU and FPGA
 # this number shouldn't be set to too large, otherwise the FPGA will be overwhelmed by retranmissions
-query_window_size: 5
+query_window_size: 2
 
 # batch window size controls the speed of index scan on CPU 
 batch_window_size: 1
