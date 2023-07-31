@@ -3,34 +3,35 @@ This scripts executes the CPU and FPGA programs by reading the config file and a
 
 Example (one CPU and one FPGA)):
 	In terminal 1:
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_1_FPGA.json --mode CPU
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_1_FPGA.yaml --mode CPU
 	In terminal 2:
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_1_FPGA.json --mode FPGA --fpga_id 0
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_1_FPGA.yaml --mode FPGA --fpga_id 0
 
 Example (one CPU and two FPGA)):
 	In terminal 1:
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_2_FPGA.json --mode CPU
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_2_FPGA.yaml --mode CPU
 	In terminal 2 ~ 3:
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_2_FPGA.json --mode FPGA --fpga_id 0
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_2_FPGA.json --mode FPGA --fpga_id 1
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_2_FPGA.yaml --mode FPGA --fpga_id 0
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_2_FPGA.yaml --mode FPGA --fpga_id 1
 
 
 Example (one CPU and four FPGA)):
 	In terminal 1:
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.json --mode CPU
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.yaml --mode CPU
 	In terminal 2 ~ 5:
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.json --mode FPGA --fpga_id 0
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.json --mode FPGA --fpga_id 1
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.json --mode FPGA --fpga_id 2
-		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.json --mode FPGA --fpga_id 3
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.yaml --mode FPGA --fpga_id 0
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.yaml --mode FPGA --fpga_id 1
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.yaml --mode FPGA --fpga_id 2
+		python launch_CPU_and_FPGA.py --config_fname ./config/local_network_test_4_FPGA.yaml --mode FPGA --fpga_id 3
 """
 
 import argparse 
 import json
 import os
+import yaml
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--config_fname', type=str, default='./config/local_network_test_1_FPGA.json')
+parser.add_argument('--config_fname', type=str, default='./config/local_network_test_1_FPGA.yaml')
 parser.add_argument('--mode', type=str, help='CPU or FPGA')
 
 # if run in the CPU mode
@@ -48,9 +49,6 @@ if mode == 'CPU':
 elif mode == 'FPGA':
 	fpga_simulator_exe_dir = args.fpga_simulator_exe_dir
 	fpga_id = args.fpga_id
-
-with open(config_fname, 'r') as f:
-	json_dict = json.load(f)
 	
 def dict_to_string(data):
     if isinstance(data, list):
@@ -60,8 +58,10 @@ def dict_to_string(data):
     else:
         return str(data)
 
-json_dict = dict_to_string(json_dict)
-print(json_dict)
+config_file = open(args.config_fname, "r")
+config_dict = yaml.safe_load(config_file)
+config_dict = dict_to_string(config_dict)
+print(config_dict)
 
 if mode == 'CPU':
 	"""
@@ -75,25 +75,25 @@ if mode == 'CPU':
     "<10 + 3 * num_FPGA enable_index_scan> <11 + 3 * num_FPGA omp_threads>"<< std::endl;
 	"""
 	cmd = ''
-	cmd += 'taskset --cpu-list 0-{} '.format(json_dict['cpu_cores'])
+	cmd += 'taskset --cpu-list 0-{} '.format(config_dict['cpu_cores'])
 	cmd += cpu_exe_dir + ' '
-	cmd += json_dict['num_FPGA'] + ' '
-	for i in range(int(json_dict['num_FPGA'])):
-		cmd += json_dict['FPGA_IP_addr'][i] + ' '
-	for i in range(int(json_dict['num_FPGA'])):
-		cmd += json_dict['C2F_port'][i] + ' '
-	for i in range(int(json_dict['num_FPGA'])):
-		cmd += json_dict['F2C_port'][i] + ' '
-	cmd += json_dict['D'] + ' '
-	cmd += json_dict['TOPK'] + ' '
-	cmd += json_dict['batch_size'] + ' '
-	cmd += json_dict['total_batch_num'] + ' '
-	cmd += json_dict['nprobe'] + ' '
-	cmd += json_dict['nlist'] + ' '
-	cmd += json_dict['query_window_size'] + ' '
-	cmd += json_dict['batch_window_size'] + ' '
-	cmd += json_dict['enable_index_scan'] + ' '
-	cmd += json_dict['cpu_cores'] + ' '
+	cmd += config_dict['num_FPGA'] + ' '
+	for i in range(int(config_dict['num_FPGA'])):
+		cmd += config_dict['FPGA_IP_addr'][i] + ' '
+	for i in range(int(config_dict['num_FPGA'])):
+		cmd += config_dict['C2F_port'][i] + ' '
+	for i in range(int(config_dict['num_FPGA'])):
+		cmd += config_dict['F2C_port'][i] + ' '
+	cmd += config_dict['D'] + ' '
+	cmd += config_dict['TOPK'] + ' '
+	cmd += config_dict['batch_size'] + ' '
+	cmd += config_dict['total_batch_num'] + ' '
+	cmd += config_dict['nprobe'] + ' '
+	cmd += config_dict['nlist'] + ' '
+	cmd += config_dict['query_window_size'] + ' '
+	cmd += config_dict['batch_window_size'] + ' '
+	cmd += config_dict['enable_index_scan'] + ' '
+	cmd += config_dict['cpu_cores'] + ' '
 	print('Executing: ', cmd)
 	os.system(cmd)
 
@@ -103,10 +103,10 @@ elif mode == 'FPGA':
 	"""
 	cmd = ''
 	cmd += fpga_simulator_exe_dir + ' '
-	cmd += json_dict['CPU_IP_addr'] + ' '
-	cmd += json_dict['F2C_port'][fpga_id] + ' '
-	cmd += json_dict['C2F_port'][fpga_id] + ' '
-	cmd += json_dict['D'] + ' '
-	cmd += json_dict['TOPK'] + ' '
+	cmd += config_dict['CPU_IP_addr'] + ' '
+	cmd += config_dict['F2C_port'][fpga_id] + ' '
+	cmd += config_dict['C2F_port'][fpga_id] + ' '
+	cmd += config_dict['D'] + ' '
+	cmd += config_dict['TOPK'] + ' '
 	print('Executing: ', cmd)
 	os.system(cmd)

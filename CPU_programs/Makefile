@@ -1,4 +1,7 @@
-CC = g++
+# hacc build server default gcc version is 9.4.0, does not support semaphore in c++20
+CC = /home/wejiang/.local/gcc-12.3.0/bin/g++
+# CC = g++
+
 CLAGS=-Wall -std=c++20
 LINK = -lpthread
 LINK_OMP = -fopenmp
