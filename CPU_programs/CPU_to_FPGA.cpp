@@ -152,7 +152,9 @@ public:
 
   std::chrono::system_clock::time_point* batch_start_time_array;
   std::chrono::system_clock::time_point* batch_finish_time_array;
+  // end-to-end performance
   double* batch_duration_ms_array;
+  double QPS;
 
   // constructor
   CPUCoordinator(
@@ -601,6 +603,23 @@ public:
     std::cout << "  Max (ms): " << sorted_duration_ms.back() << std::endl;
     std::cout << "  Medium (ms): " << sorted_duration_ms.at(total_batch_num / 2) << std::endl;
     std::cout << "  Average (ms): " << ave_ms << std::endl;
+
+
+    double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(
+      batch_finish_time_array[total_batch_num - 1] - batch_start_time_array[0]).count());
+    double durationMs = durationUs / 1000.0;
+    QPS = total_query_num / (durationUs / 1000.0 / 1000.0);
+    std::cout << "End-to-end Duration (ms) = " << durationMs << std::endl;
+    std::cout << "End-to-end QPS = " << QPS << std::endl;
+
+    // write latency and throughput to file in double-precision
+    FILE *file_latency = fopen("profile_latency_ms_distribution.double", "w");
+    fwrite(batch_duration_ms_array, sizeof(double), total_batch_num, file_latency);
+    fclose(file_latency);
+
+    FILE *file_throughput = fopen("profile_QPS.double", "w");
+    fwrite(&QPS, sizeof(double), 1, file_throughput);
+    fclose(file_throughput);
   }
 };
 

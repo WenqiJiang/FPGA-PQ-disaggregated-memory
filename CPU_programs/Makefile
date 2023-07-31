@@ -1,4 +1,5 @@
 # hacc build server default gcc version is 9.4.0, does not support semaphore in c++20
+# In case the following error occurs, /usr/bin/ld: final link failed: Input/output error, manually type in the g++ command
 CC = /home/wejiang/.local/gcc-12.3.0/bin/g++
 # CC = g++
 

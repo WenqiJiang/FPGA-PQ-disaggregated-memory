@@ -30,6 +30,10 @@ import json
 import os
 import yaml
 
+import numpy as np
+
+from helper import save_obj, load_obj
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--config_fname', type=str, default='./config/local_network_test_1_FPGA.yaml')
 parser.add_argument('--mode', type=str, help='CPU or FPGA')
@@ -96,6 +100,32 @@ if mode == 'CPU':
 	cmd += config_dict['cpu_cores'] + ' '
 	print('Executing: ', cmd)
 	os.system(cmd)
+
+	print('Loading and copying profile...')
+	latency_ms_distribution = np.fromfile('profile_latency_ms_distribution.double', dtype=np.float64).reshape(-1,)
+	# deep copy latency_ms_distribution
+	latency_ms_distribution_sorted = np.array(latency_ms_distribution)
+	latency_ms_distribution_sorted.sort()
+	latency_ms_min = latency_ms_distribution_sorted[0]
+	latency_ms_max = latency_ms_distribution_sorted[-1]
+	latency_ms_median = latency_ms_distribution_sorted[int(len(latency_ms_distribution_sorted) / 2)]
+	QPS = np.fromfile('profile_QPS.double', dtype=np.float64).reshape(-1,)[0]
+
+	print("Loaded profile: ")
+	print("latency_ms_min: ", latency_ms_min)
+	print("latency_ms_max: ", latency_ms_max)
+	print("latency_ms_median: ", latency_ms_median)
+	print("QPS: ", QPS)
+	
+	config_dict['latency_ms_distribution'] = latency_ms_distribution
+	config_dict['latency_ms_min'] = latency_ms_min
+	config_dict['latency_ms_max'] = latency_ms_max
+	config_dict['latency_ms_median'] = latency_ms_median
+	config_dict['QPS'] = QPS
+
+	fname = os.path.basename(config_fname).split('.')[0] 
+	save_obj(config_dict, 'performance_pickle', fname)
+
 
 elif mode == 'FPGA':
 	"""
