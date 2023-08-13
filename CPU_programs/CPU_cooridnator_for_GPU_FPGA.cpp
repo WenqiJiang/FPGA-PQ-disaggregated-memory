@@ -1,29 +1,29 @@
-/* Host CPU communicates with one or multiple FPGAs
-   2 thread, 1 for sending query, 1 for receiving results
+/* Host CPU communicates with one or multiple FPGAs and one GPU cooridnator,
+	it forward the query & centroid vectors and received from the GPU coordinator, and broadcast them to the FPGAs
+
+  3 threads: 
+   	1 for receiving query (G2C)
+    1 for sending query (C2F)
+    1 for receiving and forwarding results (F2C & C2G)
+	
 
  Usage (e.g.):
 
-  std::cout << "Usage: " << argv[0] << " <1 num_FPGA> "
-  	"<2 ~ 2 + num_FPGA - 1 FPGA_IP_addr> " 
-    "<2 + num_FPGA ~ 2 + 2 * num_FPGA - 1 C2F_port> " 
-    "<2 + 2 * num_FPGA ~ 2 + 3 * num_FPGA - 1 F2C_port> "
-    "<2 + 3 * num_FPGA D> <3 + 3 * num_FPGA TOPK> <4 + 3 * num_FPGA batch_size> "
-    "<5 + 3 * num_FPGA total_batch_num> <6 + 3 * num_FPGA nprobe> <7 + 3 * num_FPGA nlist>"
-    "<8 + 3 * num_FPGA query_window_size> <9 + 3 * num_FPGA batch_window_size>" 
-    "<10 + 3 * num_FPGA enable_index_scan> <11 + 3 * num_FPGA omp_threads>"<< std::endl;
+  std::cout << "Usage: " << argv[0] << 
+	" <L=1 G2C_port> "
+  	" <L=1 num_FPGA> "
+  	" <L=num_FPGA FPGA_IP_addrs> " 
+    " <L=num_FPGA C2F_ports> " 
+    " <L=num_FPGA F2C_ports> "
+    " <L=1 D> <L=1 TOPK> <L=1 batch_size> "
+    " <L=1 total_batch_num> <L=1 nprobe> <L=1 nlist>"
+    " <L=1 query_window_size> <L=1 batch_window_size>" << std::endl;
 
   Single FPGA example:
-     # no index scan
-     ./CPU_to_FPGA 1 10.253.74.24 8881 5001 128 100 32 100 16 10 0
-	 # with index scan
-     ./CPU_to_FPGA 1 10.253.74.24 8881 5001 128 100 32 100 16 10 1 8
+     ./CPU_cooridnator_for_GPU_FPGA 9091 1 10.253.74.24 8881 5001 128 100 32 100 16 10 
   
   Two FPGAs example:
-	 # no index scan
-     ./CPU_to_FPGA 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 16 10 0
-	 # with index scan
-     ./CPU_to_FPGA 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 16 10 1 8
-
+     ./CPU_cooridnator_for_GPU_FPGA 9091 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 16 10
 */
 
 #include <algorithm>
@@ -45,7 +45,7 @@
 #include <vector>
 
 #include "constants.hpp"
-#include "hnswlib_omp/hnswlib.h"
+// #include "hnswlib_omp/hnswlib.h"
 
 // #define DEBUG // uncomment to activate debug print-statements
 
@@ -82,12 +82,13 @@ public:
   const int num_FPGA; // <= MAX_FPGA_NUM
 
   // arrays of FPGA IP addresses and ports
-  const char** FPGA_IP_addr;
-  const unsigned int* C2F_port; // FPGA recv, CPU send
-  const unsigned int* F2C_port; // FPGA send, CPU receive
+  const char** FPGA_IP_addrs;
+  const unsigned int* C2F_ports; // FPGA recv, CPU send
+  const unsigned int* F2C_ports; // FPGA send, CPU receive
+  const unsigned int G2C_port; // GPU send/recv, CPU send/recv
 
   // states during data transfer
-  int start_index; // signal that index thread has finished initialization
+  int start_G2C; // signal that index thread has finished initialization
   int start_F2C; // signal that F2C thread has finished setup connection
   int start_C2F; // signal that C2F thread has finished setup connection
 
@@ -99,25 +100,27 @@ public:
   // used by index thread & C2F thread to control send rate:
   sem_t sem_available_batches_to_send; // index scanned, yet not sent batches
 
-  unsigned int C2F_send_index;
-  unsigned int F2C_rcv_index;
+//   unsigned int C2F_send_index;
+//   unsigned int F2C_rcv_index;
 
   int C2F_batch_id;        // signal until what batch of data has been sent to FPGA
   int finish_C2F_query_id; 
-  int finish_F2C_query_id;
+  int finish_F2C_C2G_query_id;
 
   // size in bytes
   size_t bytes_C2F_header;
   size_t bytes_F2C_per_query; // expected bytes received per query including header
-  size_t bytes_C2F_per_query;
+  size_t bytes_C2F_body_per_query;
+  size_t bytes_G2C_per_batch;
+  size_t bytes_C2G_per_batch;
 
   /* An illustration of the semaphore logics:
   
-  sem_batch_window_free_slots is used for constraint compute:
-    the index scan computation should not happen much earlier before the last batch is sent to FPGA,
+  sem_batch_window_free_slots is used for constraint the total amount of queries flowing between CPU and FPGA:
+    the query receive from G2C should not happen much earlier before the last batch is sent to FPGA,
       controlled by batch_window_size
 
-  uery_window_size is used for constraint communication:
+  query_window_size is used for constraint communication:
     the F2C thread should not send much earlier before the last query is sent to FPGA,
       controlled by query_window_size
 
@@ -125,7 +128,7 @@ public:
     determining when the C2F thread can fetch data to send
   
   ------------------------------
-  |      index scan thread     |      |
+  |      G2C thread            |      |
   ------------------------------      |
     | sem_available_batches_to_send   |
     v                                 |
@@ -135,27 +138,25 @@ public:
     | sem_query_window_free_slots     |
     v                                 |
   ------------------------------      |
-  |      F2C thread            |      |
+  |      F2C & C2G thread      |      |
   ------------------------------      v
-  
   */
 
   // variables used for connections
   int* sock_c2f;
   int* sock_f2c;
+  int sock_g2c; // G2C & C2G share the same sock
 
   // C2F & F2C buffers, length = single batch of queries including padding
   char* buf_F2C;
   char* buf_C2F;
+  char* buf_G2C;
+  char* buf_C2G;
 
   // terminate signal to be sent in the packet header to FPGA
   // it is primarily part of a payload but it is also used as a signal as it affects the control flow
   // TODO: should no longer be used for signaling
   int terminate;
-
-  // variables used for index scan
-  int enable_index_scan;  
-  int omp_threads;
 
   std::chrono::system_clock::time_point* batch_start_time_array;
   std::chrono::system_clock::time_point* batch_finish_time_array;
@@ -174,26 +175,24 @@ public:
     const int in_query_window_size,
     const int in_batch_window_size,
     const int in_num_FPGA,
-    const char** in_FPGA_IP_addr,
-    const unsigned int* in_C2F_port,
-    const unsigned int* in_F2C_port,
-    const int in_enable_index_scan,
-	  const int in_omp_threads) :
+    const char** in_FPGA_IP_addrs,
+    const unsigned int* in_C2F_ports,
+    const unsigned int* in_F2C_ports,
+	const unsigned int in_G2C_port) :
     D(in_D), TOPK(in_TOPK), batch_size(in_batch_size), total_batch_num(in_total_batch_num),
     nprobe(in_nprobe), nlist(in_nlist), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
-    num_FPGA(in_num_FPGA), FPGA_IP_addr(in_FPGA_IP_addr), C2F_port(in_C2F_port), F2C_port(in_F2C_port), 
-    enable_index_scan(in_enable_index_scan), omp_threads(in_omp_threads) {
+    num_FPGA(in_num_FPGA), FPGA_IP_addrs(in_FPGA_IP_addrs), C2F_ports(in_C2F_ports), F2C_ports(in_F2C_ports), G2C_port(in_G2C_port) {
         
     // Initialize internal variables
     total_query_num = batch_size * total_batch_num;
 
-    start_index = 0;  
+    start_G2C = 0;
     start_F2C = 0;
     start_C2F = 0;
     finish_C2F_query_id = -1; 
-    finish_F2C_query_id = -1;
-    C2F_send_index = 0;
-    F2C_rcv_index = 0;
+    finish_F2C_C2G_query_id = -1;
+    // C2F_send_index = 0;
+    // F2C_rcv_index = 0;
     terminate = 0;
     C2F_batch_id = -1;
     // F2C_batch_id = -1;
@@ -204,22 +203,27 @@ public:
 
     // C2F sizes
     bytes_C2F_header = num_packages::AXI_size_C2F_header * bit_byte_const::byte_AXI;
-    bytes_C2F_per_query = bit_byte_const::byte_AXI * (num_packages::AXI_size_C2F_cell_IDs(nprobe) + num_packages::AXI_size_C2F_query_vector(D) +
+    bytes_C2F_body_per_query = bit_byte_const::byte_AXI * (num_packages::AXI_size_C2F_cell_IDs(nprobe) + num_packages::AXI_size_C2F_query_vector(D) +
                                                       nprobe * num_packages::AXI_size_C2F_center_vector(D)); // not consider header
 
-    IF_DEBUG_DO(std::cout << "bytes_C2F_per_query (exclude 64-byte header): " << bytes_C2F_per_query << std::endl;);
+    IF_DEBUG_DO(std::cout << "bytes_C2F_body_per_query (exclude 64-byte header): " << bytes_C2F_body_per_query << std::endl;);
 
     // F2C sizes
     size_t AXI_size_F2C = num_packages::AXI_size_F2C_header + num_packages::AXI_size_F2C_vec_ID(TOPK) + num_packages::AXI_size_F2C_dist(TOPK);
     bytes_F2C_per_query = bit_byte_const::byte_AXI * AXI_size_F2C; // expected bytes received per query including header
-
     IF_DEBUG_DO(std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;);
+
+    // G2C sizes
+    bytes_G2C_per_batch = bytes_C2F_header + batch_size * bytes_C2F_body_per_query;
+    bytes_C2G_per_batch = batch_size * bytes_F2C_per_query;
 
     sock_f2c = (int*) malloc(num_FPGA * sizeof(int));
     sock_c2f = (int*) malloc(num_FPGA * sizeof(int));
 
     buf_F2C = (char*) malloc(bytes_F2C_per_query);
-    buf_C2F = (char*) malloc(bytes_C2F_per_query);
+    buf_C2F = (char*) malloc(bytes_C2F_body_per_query);
+    buf_G2C = (char*) malloc(bytes_C2F_header + bytes_C2F_body_per_query);
+    buf_C2G = (char*) malloc(bytes_F2C_per_query);
 
     batch_start_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
     batch_finish_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
@@ -228,67 +232,102 @@ public:
     assert (in_num_FPGA < MAX_FPGA_NUM);
   }
 
-  void thread_index_scan() {
+  void connect_G2C() {
 
-    // initialize index
-    std::vector<float> data(nlist * D);
-    std::vector<float> query(batch_size * total_batch_num * D);   
-    hnswlib::L2Space space(D); 
-    hnswlib::AlgorithmInterface<float>* alg_brute  = new hnswlib::BruteforceSearch<float>(&space, nlist);
-    if (enable_index_scan) {
-      std::cout << "Initializing index..." << std::endl;
-      omp_set_num_threads(omp_threads); 
+    std::cout << "Should finish F2C first before G2C" << std::endl;  
+    printf("Printing G2C_ports %d\n", G2C_port);
 
-      std::mt19937 rng;
-      rng.seed(47);
-      std::uniform_real_distribution<> distrib;
-      for (size_t i = 0; i < nlist * D; ++i) {
-        data[i] = distrib(rng);
-      }
-      for (size_t i = 0; i < batch_size * total_batch_num * D; ++i) {
-        query[i] = distrib(rng);
-      }
-      for (size_t i = 0; i < nlist; ++i) {
-          alg_brute->addPoint(data.data() + D * i, i);
-      }
-      std::cout << "Index initialized." << std::endl;
+    int server_fd;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+
+    // Creating socket file descriptor
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+    perror("socket failed");
+    exit(EXIT_FAILURE);
+    }
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+    perror("setsockopt");
+    exit(EXIT_FAILURE);
     }
 
-    start_index = 1;
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(G2C_port);
+
+    // Forcefully attaching socket to the F2C_ports 8080
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+      perror("bind failed");
+      exit(EXIT_FAILURE);
+    }
+    if (listen(server_fd, 3) < 0) {
+      perror("listen");
+      exit(EXIT_FAILURE);
+    }
+    if ((sock_g2c = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0) {
+      perror("accept");
+      exit(EXIT_FAILURE);
+    }
+    
+    printf("Successfully built G2C connection.\n");
+  }
+
+  void receive_G2C_batch_query() {
+
+    size_t total_G2C_bytes = 0;
+    while (total_G2C_bytes < bytes_G2C_per_batch) {
+      int G2C_bytes_this_iter = (bytes_G2C_per_batch - total_G2C_bytes) < G2C_PKG_SIZE ?  (bytes_G2C_per_batch - total_G2C_bytes) : G2C_PKG_SIZE;
+      int G2C_bytes = read(sock_g2c, &buf_G2C[total_G2C_bytes], G2C_bytes_this_iter);
+      total_G2C_bytes += G2C_bytes;
+
+      if (G2C_bytes == -1) {
+        printf("Receiving data UNSUCCESSFUL!\n");
+        return;
+      } else {
+        // IF_DEBUG_DO(std::cout << "query_id: " << query_id << " G2C_bytes" << total_G2C_bytes << std::endl;);
+      }
+    }
+
+    if (total_G2C_bytes != bytes_G2C_per_batch) {
+      printf("Receiving error, receiving more bytes than a block\n");
+    }      
+  }
+
+  void thread_G2C() {
+
+    connect_G2C();
+    start_G2C = 1;
     while(!start_C2F) {}
 
     std::chrono::system_clock::time_point start = std::chrono::system_clock::now();
 
-    for (int index_scan_batch_id = 0; index_scan_batch_id < total_batch_num; index_scan_batch_id++) {
+    for (int g2c_batch_id = 0; g2c_batch_id < total_batch_num; g2c_batch_id++) {
 
-      std::cout << "index_scan_batch_id: " << index_scan_batch_id << std::endl;
+      std::cout << "g2c_batch_id: " << g2c_batch_id << std::endl;
       
       sem_wait(&sem_batch_window_free_slots);
-      batch_start_time_array[index_scan_batch_id] = std::chrono::system_clock::now();
-      if (enable_index_scan) {
-        auto results_batch_serial_queue =
-                  alg_brute->searchKnnBatchParallel(query.data() + index_scan_batch_id * D, nprobe, batch_size);
-        // TODO: put results somewhere
-      }
+      batch_start_time_array[g2c_batch_id] = std::chrono::system_clock::now();
+      receive_G2C_batch_query();
       sem_post(&sem_available_batches_to_send);
 	  }
-
 
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
     
-    std::cout << "Index scan side Duration (us) = " << durationUs << std::endl;
-    std::cout << "Index scan side QPS () = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
-    std::cout << "Index scan side finished." << std::endl;
+    std::cout << "G2C side Duration (us) = " << durationUs << std::endl;
+    std::cout << "G2C side QPS () = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
+    std::cout << "G2C side finished." << std::endl;
     
     return; 
   }
+
 
   void connect_C2F() {
 
     for (int n = 0; n < num_FPGA; n++) {
       
-      printf("Printing C2F_port from C2F thread %d\n", C2F_port[n]);
+      printf("Printing C2F_ports from C2F thread %d\n", C2F_ports[n]);
 
       struct sockaddr_in serv_addr;
 
@@ -298,12 +337,12 @@ public:
       }
 
       serv_addr.sin_family = AF_INET;
-      serv_addr.sin_port = htons(C2F_port[n]);
+      serv_addr.sin_port = htons(C2F_ports[n]);
 
       // Convert IPv4 and IPv6 addresses from text to binary form
       // if(inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr)<=0)
       // if(inet_pton(AF_INET, "10.1.212.153", &serv_addr.sin_addr)<=0)
-      if (inet_pton(AF_INET, FPGA_IP_addr[n], &serv_addr.sin_addr) <= 0) {
+      if (inet_pton(AF_INET, FPGA_IP_addrs[n], &serv_addr.sin_addr) <= 0) {
         printf("\nInvalid address/ Address not supported \n");
         return;
       }
@@ -319,7 +358,7 @@ public:
   }
 
   // C2F send batch header
-  void send_header(char *buf_header) {
+  void send_C2F_header(char *buf_header) {
     for (int n = 0; n < num_FPGA; n++) {
       size_t sent_header_bytes = 0;
       while (sent_header_bytes < bytes_C2F_header) {
@@ -335,11 +374,11 @@ public:
   }
 
   // C2F send a single query
-  void send_query() {
+  void send_C2F_query() {
     for (int n = 0; n < num_FPGA; n++) {
       size_t total_C2F_bytes = 0;
-      while (total_C2F_bytes < bytes_C2F_per_query) {
-        int C2F_bytes_this_iter = (bytes_C2F_per_query - total_C2F_bytes) < C2F_PKG_SIZE ? (bytes_C2F_per_query - total_C2F_bytes) : C2F_PKG_SIZE;
+      while (total_C2F_bytes < bytes_C2F_body_per_query) {
+        int C2F_bytes_this_iter = (bytes_C2F_body_per_query - total_C2F_bytes) < C2F_PKG_SIZE ? (bytes_C2F_body_per_query - total_C2F_bytes) : C2F_PKG_SIZE;
         int C2F_bytes = send(sock_c2f[n], &buf_C2F[total_C2F_bytes], C2F_bytes_this_iter, 0);
         total_C2F_bytes += C2F_bytes;
         if (C2F_bytes == -1) {
@@ -349,7 +388,7 @@ public:
           IF_DEBUG_DO(std::cout << "total C2F bytes = " << total_C2F_bytes << std::endl;);
         }
       }
-      if (total_C2F_bytes != bytes_C2F_per_query) {
+      if (total_C2F_bytes != bytes_C2F_body_per_query) {
         printf("Sending error, sending more bytes than a block\n");
       }
     }
@@ -363,7 +402,7 @@ public:
       
     // wait for ready
     while(!start_F2C) {}
-    while(!start_index) {}
+    while(!start_G2C) {}
 
     connect_C2F();
 
@@ -405,7 +444,7 @@ public:
       memcpy(buf_header + 4, &nprobe, 4);
       memcpy(buf_header + 8, &terminate, 4);
 
-      send_header(buf_header);
+      send_C2F_header(buf_header);
 
       if (terminate) {
         break;
@@ -429,7 +468,7 @@ public:
         memcpy(buf_C2F, buf_cell_ids, n_bytes_cell_ids);
         memcpy(buf_C2F + n_bytes_cell_ids, buf_query, n_bytes_query_vector);
         memcpy(buf_C2F + n_bytes_cell_ids + n_bytes_query_vector, buf_center_vectors, n_bytes_center_vectors);
-        send_query();
+        send_C2F_query();
         finish_C2F_query_id++;
         std::cout << "C2F finish query_id " << finish_C2F_query_id << std::endl;
       }
@@ -452,7 +491,7 @@ public:
 
     for (int n = 0; n < num_FPGA; n++) {
       
-      printf("Printing F2C_port from Thread %d\n", F2C_port[n]);
+      printf("Printing F2C_ports from Thread %d\n", F2C_ports[n]);
 
       int server_fd;
       struct sockaddr_in address;
@@ -471,9 +510,9 @@ public:
 
       address.sin_family = AF_INET;
       address.sin_addr.s_addr = INADDR_ANY;
-      address.sin_port = htons(F2C_port[n]);
+      address.sin_port = htons(F2C_ports[n]);
 
-      // Forcefully attaching socket to the F2C_port 8080
+      // Forcefully attaching socket to the F2C_ports 8080
       if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
@@ -488,9 +527,10 @@ public:
       }
       printf("Successfully built connection.\n");
     }
+      printf("Successfully built all F2C connection.\n");
   }
 
-  void receive_answer_to_query() {
+  void receive_F2C_batch_result() {
 
     // TODO: each FPGA's msg should has its own buffer, not a shared buf_F2C
     for (int n = 0; n < num_FPGA; n++) {
@@ -514,7 +554,21 @@ public:
     }
   }
 
-  void thread_F2C() { 
+  void send_C2G_batch_result() {
+
+    size_t sent_bytes = 0;
+    while (sent_bytes < bytes_C2G_per_batch) {
+      int C2G_bytes_this_iter = (bytes_C2G_per_batch - sent_bytes) < C2G_PKG_SIZE ? (bytes_C2G_per_batch - sent_bytes) : C2G_PKG_SIZE;
+      int C2G_bytes = send(sock_g2c, &buf_G2C[sent_bytes], C2G_bytes_this_iter, 0);
+      sent_bytes += C2G_bytes;
+      if (C2G_bytes == -1) {
+        printf("Sending data UNSUCCESSFUL!\n");
+        return;
+      }
+    }
+  }
+
+  void thread_F2C_C2G() { 
 
     connect_F2C();
     start_F2C = 1;
@@ -546,11 +600,11 @@ public:
     // TODO: find a good way to signal to this thread that terminate signal was received and when the last batch is received.
     for (int F2C_batch_id = 0; F2C_batch_id < total_batch_num; F2C_batch_id++) {
 
-      std::cout << "F2C_batch_id: " << F2C_batch_id << std::endl;
+      std::cout << "F2C_C2G_batch_id: " << F2C_batch_id << std::endl;
 
       for (int query_id = 0; query_id < batch_size; query_id++) {
 
-        receive_answer_to_query();
+        receive_F2C_batch_result();
 
         // Each query received consists of [header] [topk x ids] [topk x dists] all three padded to the next AXI packet size
         // We copy all answers into the same array such that the GPU can simply interpret it at as a 2D array
@@ -558,8 +612,10 @@ public:
         memcpy(vector_ids_buf + query_id * TOPK, buf_F2C + byte_offset_vector_ids_buf, TOPK * (bit_byte_const::bit_long_int / 8));
         memcpy(distances_buf + query_id * TOPK, buf_F2C + byte_offset_distances_buf, TOPK * (bit_byte_const::bit_float / 8));
 
-        finish_F2C_query_id++;
-        std::cout << "F2C finish query_id " << finish_F2C_query_id << std::endl;
+        send_C2G_batch_result();
+
+        finish_F2C_C2G_query_id++;
+        std::cout << "F2C finish query_id " << finish_F2C_C2G_query_id << std::endl;
         // sem_post() increments (unlocks) the semaphore pointed to by sem
         sem_post(&sem_query_window_free_slots);
       }
@@ -570,9 +626,9 @@ public:
   std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
   double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
 
-  std::cout << "F2C side Duration (us) = " << durationUs << std::endl;
-  std::cout << "F2C side QPS = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
-  std::cout << "F2C side Finished." << std::endl;
+  std::cout << "F2C & C2G side Duration (us) = " << durationUs << std::endl;
+  std::cout << "F2C & C2G side QPS = " << total_query_num / (durationUs / 1000.0 / 1000.0) << std::endl;
+  std::cout << "F2C & C2G side Finished." << std::endl;
 
   return;  
   }
@@ -580,12 +636,12 @@ public:
   void start_C2F_F2C_threads() {
 
     // start thread with member function: https://stackoverflow.com/questions/10673585/start-thread-with-member-function
-    std::thread t_index(&CPUCoordinator::thread_index_scan, this);
-    std::thread t_F2C(&CPUCoordinator::thread_F2C, this);
+    std::thread t_G2C(&CPUCoordinator::thread_G2C, this);
+    std::thread t_F2C_C2G(&CPUCoordinator::thread_F2C_C2G, this);
     std::thread t_C2F(&CPUCoordinator::thread_C2F, this);
 
-    t_index.join();
-    t_F2C.join();
+    t_G2C.join();
+    t_F2C_C2G.join();
     t_C2F.join();
   }
 
@@ -634,42 +690,48 @@ public:
 int main(int argc, char const *argv[]) 
 { 
   //////////     Parameter Init     //////////  
-  std::cout << "Usage: " << argv[0] << " <1 num_FPGA> "
-  	"<2 ~ 2 + num_FPGA - 1 FPGA_IP_addr> " 
-    "<2 + num_FPGA ~ 2 + 2 * num_FPGA - 1 C2F_port> " 
-    "<2 + 2 * num_FPGA ~ 2 + 3 * num_FPGA - 1 F2C_port> "
-    "<2 + 3 * num_FPGA D> <3 + 3 * num_FPGA TOPK> <4 + 3 * num_FPGA batch_size> "
-    "<5 + 3 * num_FPGA total_batch_num> <6 + 3 * num_FPGA nprobe> <7 + 3 * num_FPGA nlist>"
-    "<8 + 3 * num_FPGA query_window_size> <9 + 3 * num_FPGA batch_window_size>" 
-    "<10 + 3 * num_FPGA enable_index_scan> <11 + 3 * num_FPGA omp_threads>"<< std::endl;
+  std::cout << "Usage: " << argv[0] << 
+	" <L=1 G2C_port> "
+  	" <L=1 num_FPGA> "
+  	" <L=num_FPGA FPGA_IP_addrs> " 
+    " <L=num_FPGA C2F_ports> " 
+    " <L=num_FPGA F2C_ports> "
+    " <L=1 D> <L=1 TOPK> <L=1 batch_size> "
+    " <L=1 total_batch_num> <L=1 nprobe> <L=1 nlist>"
+    " <L=1 query_window_size> <L=1 batch_window_size>" << std::endl;
 
   int argv_cnt = 1;
+  std::cout << argc;
+
+  unsigned int G2C_port = strtol(argv[argv_cnt++], NULL, 10);
+  
   int num_FPGA = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "num_FPGA: " << num_FPGA << std::endl;
-  assert(argc == 12 + 3 * num_FPGA);
+  assert(argc == 11 + 3 * num_FPGA);
   assert(num_FPGA <= MAX_FPGA_NUM);
 
-  const char* FPGA_IP_addr[num_FPGA];
-  for (int n = 0; n < num_FPGA; n++) {
-      FPGA_IP_addr[n] = argv[argv_cnt++];
-      std::cout << "FPGA " << n << " IP addr: " << FPGA_IP_addr[n] << std::endl;
-  }   
-  // FPGA_IP_addr = "10.253.74.5"; // alveo-build-01
-  // FPGA_IP_addr = "10.253.74.12"; // alveo-u250-01
-  // FPGA_IP_addr = "10.253.74.16"; // alveo-u250-02
-  // FPGA_IP_addr = "10.253.74.20"; // alveo-u250-03
-  // FPGA_IP_addr = "10.253.74.24"; // alveo-u250-04
 
-  unsigned int C2F_port[num_FPGA];
+  const char* FPGA_IP_addrs[num_FPGA];
   for (int n = 0; n < num_FPGA; n++) {
-      C2F_port[n] = strtol(argv[argv_cnt++], NULL, 10);
-      std::cout << "C2F_port " << n << ": " << C2F_port[n] << std::endl;
+      FPGA_IP_addrs[n] = argv[argv_cnt++];
+      std::cout << "FPGA " << n << " IP addr: " << FPGA_IP_addrs[n] << std::endl;
+  }   
+  // FPGA_IP_addrs = "10.253.74.5"; // alveo-build-01
+  // FPGA_IP_addrs = "10.253.74.12"; // alveo-u250-01
+  // FPGA_IP_addrs = "10.253.74.16"; // alveo-u250-02
+  // FPGA_IP_addrs = "10.253.74.20"; // alveo-u250-03
+  // FPGA_IP_addrs = "10.253.74.24"; // alveo-u250-04
+
+  unsigned int C2F_ports[num_FPGA];
+  for (int n = 0; n < num_FPGA; n++) {
+      C2F_ports[n] = strtol(argv[argv_cnt++], NULL, 10);
+      std::cout << "C2F_ports " << n << ": " << C2F_ports[n] << std::endl;
   } 
 
-  unsigned int F2C_port[num_FPGA];
+  unsigned int F2C_ports[num_FPGA];
   for (int n = 0; n < num_FPGA; n++) {
-      F2C_port[n] = strtol(argv[argv_cnt++], NULL, 10);
-      std::cout << "F2C_port " << n << ": " << F2C_port[n] << std::endl;
+      F2C_ports[n] = strtol(argv[argv_cnt++], NULL, 10);
+      std::cout << "F2C_ports " << n << ": " << F2C_ports[n] << std::endl;
   } 
     
   size_t D = strtol(argv[argv_cnt++], NULL, 10);
@@ -705,13 +767,6 @@ int main(int argc, char const *argv[])
     ", batch window size controls how many batches can be computed for index scan in advance (compute control)" << std::endl;
   assert (batch_window_size >= 1);
 
-  // 0 -> no index scan computation
-  // 1 -> enable index scan computation
-  int enable_index_scan = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "enable_index_scan: " << enable_index_scan << std::endl;
-
-  int omp_threads = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "omp_threads: " << omp_threads << std::endl;
     
   CPUCoordinator cpu_coordinator(
     D,
@@ -723,11 +778,10 @@ int main(int argc, char const *argv[])
     query_window_size,
     batch_window_size,
     num_FPGA,
-    FPGA_IP_addr,
-    C2F_port,
-    F2C_port,
-    enable_index_scan,
-    omp_threads);
+    FPGA_IP_addrs,
+    C2F_ports,
+    F2C_ports,
+	G2C_port);
 
   cpu_coordinator.start_C2F_F2C_threads();
   cpu_coordinator.calculate_latency();

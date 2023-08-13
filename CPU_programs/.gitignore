@@ -3,3 +3,4 @@ CPU_to_FPGA
 FPGA_simulator
 CPU_to_single_FPGA
 *.double
+CPU_cooridnator_for_GPU_FPGA

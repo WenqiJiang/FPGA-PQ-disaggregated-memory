@@ -2,6 +2,8 @@
 
 #define F2C_PKG_SIZE 1024 // 1024
 #define C2F_PKG_SIZE 4096 // 1024
+#define G2C_PKG_SIZE 4096 
+#define C2G_PKG_SIZE 4096 
 
 namespace bit_byte_const {
 const size_t bit_int = 32;
