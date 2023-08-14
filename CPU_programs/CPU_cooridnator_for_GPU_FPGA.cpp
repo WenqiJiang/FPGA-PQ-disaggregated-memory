@@ -15,15 +15,15 @@
   	" <L=num_FPGA FPGA_IP_addrs> " 
     " <L=num_FPGA C2F_ports> " 
     " <L=num_FPGA F2C_ports> "
-    " <L=1 D> <L=1 TOPK> <L=1 batch_size> "
-    " <L=1 total_batch_num> <L=1 nprobe> <L=1 nlist>"
+    " <L=1 D> <L=1 CPU_TOPK> <L=1 batch_size> "
+    " <L=1 total_batch_num> <L=1 nprobe> "
     " <L=1 query_window_size> <L=1 batch_window_size>" << std::endl;
 
   Single FPGA example:
-     ./CPU_cooridnator_for_GPU_FPGA 9091 1 10.253.74.24 8881 5001 128 100 32 100 16 10 
+     ./CPU_cooridnator_for_GPU_FPGA 9091 1 10.253.74.24 8881 5001 128 100 32 100 32 10 4 
   
   Two FPGAs example:
-     ./CPU_cooridnator_for_GPU_FPGA 9091 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 16 10
+     ./CPU_cooridnator_for_GPU_FPGA 9091 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 32 10 4 
 */
 
 #include <algorithm>
@@ -70,12 +70,11 @@ class CPUCoordinator {
 public:
   // parameters
   const size_t D;
-  const size_t TOPK;
+  const size_t CPU_TOPK;
   const int batch_size;
   const int total_batch_num; // total number of batches to send
   int total_query_num;       // total number of numbers of queries
   const int nprobe;
-  const int nlist;
   const int query_window_size; // gap between query IDs of C2F and F2C
   const int batch_window_size; // whether enable inter-batch pipeline overlap (0 = low latency; 1 = hgih throughput)
 
@@ -105,13 +104,16 @@ public:
 
   int C2F_batch_id;        // signal until what batch of data has been sent to FPGA
   int finish_C2F_query_id; 
-  int finish_F2C_C2G_query_id;
+  int finish_F2C_query_id;
 
   // size in bytes
   size_t bytes_C2F_header;
   size_t bytes_F2C_per_query; // expected bytes received per query including header
+  size_t bytes_F2C_per_batch;
   size_t bytes_C2F_body_per_query;
+  size_t bytes_C2F_per_batch;
   size_t bytes_G2C_per_batch;
+  size_t bytes_C2G_per_query;
   size_t bytes_C2G_per_batch;
 
   /* An illustration of the semaphore logics:
@@ -167,20 +169,19 @@ public:
   // constructor
   CPUCoordinator(
     const size_t in_D,
-    const size_t in_TOPK, 
+    const size_t in_CPU_TOPK, 
     const int in_batch_size,
     const int in_total_batch_num,
     const int in_nprobe,
-    const int in_nlist,
     const int in_query_window_size,
     const int in_batch_window_size,
     const int in_num_FPGA,
     const char** in_FPGA_IP_addrs,
     const unsigned int* in_C2F_ports,
     const unsigned int* in_F2C_ports,
-	const unsigned int in_G2C_port) :
-    D(in_D), TOPK(in_TOPK), batch_size(in_batch_size), total_batch_num(in_total_batch_num),
-    nprobe(in_nprobe), nlist(in_nlist), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
+	  const unsigned int in_G2C_port) :
+    D(in_D), CPU_TOPK(in_CPU_TOPK), batch_size(in_batch_size), total_batch_num(in_total_batch_num),
+    nprobe(in_nprobe), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
     num_FPGA(in_num_FPGA), FPGA_IP_addrs(in_FPGA_IP_addrs), C2F_ports(in_C2F_ports), F2C_ports(in_F2C_ports), G2C_port(in_G2C_port) {
         
     // Initialize internal variables
@@ -190,7 +191,7 @@ public:
     start_F2C = 0;
     start_C2F = 0;
     finish_C2F_query_id = -1; 
-    finish_F2C_C2G_query_id = -1;
+    finish_F2C_query_id = -1;
     // C2F_send_index = 0;
     // F2C_rcv_index = 0;
     terminate = 0;
@@ -205,25 +206,31 @@ public:
     bytes_C2F_header = num_packages::AXI_size_C2F_header * bit_byte_const::byte_AXI;
     bytes_C2F_body_per_query = bit_byte_const::byte_AXI * (num_packages::AXI_size_C2F_cell_IDs(nprobe) + num_packages::AXI_size_C2F_query_vector(D) +
                                                       nprobe * num_packages::AXI_size_C2F_center_vector(D)); // not consider header
+    bytes_C2F_per_batch = bytes_C2F_header + batch_size * bytes_C2F_body_per_query;
+    std::cout << "bytes_C2F_per_batch: " << bytes_C2F_per_batch << std::endl;
 
-    IF_DEBUG_DO(std::cout << "bytes_C2F_body_per_query (exclude 64-byte header): " << bytes_C2F_body_per_query << std::endl;);
+    std::cout << "bytes_C2F_body_per_query (exclude 64-byte header): " << bytes_C2F_body_per_query << std::endl;
 
     // F2C sizes
-    size_t AXI_size_F2C = num_packages::AXI_size_F2C_header + num_packages::AXI_size_F2C_vec_ID(TOPK) + num_packages::AXI_size_F2C_dist(TOPK);
+    size_t AXI_size_F2C = num_packages::AXI_size_F2C_header + num_packages::AXI_size_F2C_vec_ID(FPGA_TOPK) + num_packages::AXI_size_F2C_dist(FPGA_TOPK);
     bytes_F2C_per_query = bit_byte_const::byte_AXI * AXI_size_F2C; // expected bytes received per query including header
-    IF_DEBUG_DO(std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;);
+	  bytes_F2C_per_batch = bytes_F2C_per_query * batch_size;
+    // std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;
+	  std::cout << "bytes_F2C_per_batch: " << bytes_F2C_per_batch << std::endl;
 
     // G2C sizes
-    bytes_G2C_per_batch = bytes_C2F_header + batch_size * bytes_C2F_body_per_query;
-    bytes_C2G_per_batch = batch_size * bytes_F2C_per_query;
+    bytes_G2C_per_batch = bytes_C2F_per_batch;
+	  bytes_C2G_per_query = bit_byte_const::byte_long_int * CPU_TOPK + bit_byte_const::byte_float * CPU_TOPK;
+    bytes_C2G_per_batch = batch_size * bytes_C2G_per_query;
 
     sock_f2c = (int*) malloc(num_FPGA * sizeof(int));
     sock_c2f = (int*) malloc(num_FPGA * sizeof(int));
 
     buf_F2C = (char*) malloc(bytes_F2C_per_query);
     buf_C2F = (char*) malloc(bytes_C2F_body_per_query);
-    buf_G2C = (char*) malloc(bytes_C2F_header + bytes_C2F_body_per_query);
-    buf_C2G = (char*) malloc(bytes_F2C_per_query);
+    buf_G2C = (char*) malloc(bytes_C2F_per_batch);
+    buf_C2G = (char*) malloc(bytes_C2G_per_batch);
+	  std::cout << "bytes_C2G_per_batch: " << bytes_C2G_per_batch << std::endl;
 
     batch_start_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
     batch_finish_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
@@ -280,9 +287,9 @@ public:
       int G2C_bytes_this_iter = (bytes_G2C_per_batch - total_G2C_bytes) < G2C_PKG_SIZE ?  (bytes_G2C_per_batch - total_G2C_bytes) : G2C_PKG_SIZE;
       int G2C_bytes = read(sock_g2c, &buf_G2C[total_G2C_bytes], G2C_bytes_this_iter);
       total_G2C_bytes += G2C_bytes;
-
+      
       if (G2C_bytes == -1) {
-        printf("Receiving data UNSUCCESSFUL!\n");
+        printf("receive_G2C_batch_query Receiving data UNSUCCESSFUL!\n");
         return;
       } else {
         // IF_DEBUG_DO(std::cout << "query_id: " << query_id << " G2C_bytes" << total_G2C_bytes << std::endl;);
@@ -541,7 +548,7 @@ public:
         total_F2C_bytes += F2C_bytes;
 
         if (F2C_bytes == -1) {
-          printf("Receiving data UNSUCCESSFUL!\n");
+          printf("receive_F2C_batch_result Receiving data UNSUCCESSFUL!\n");
           return;
         } else {
           // IF_DEBUG_DO(std::cout << "query_id: " << query_id << " F2C_bytes" << total_F2C_bytes << std::endl;);
@@ -559,7 +566,7 @@ public:
     size_t sent_bytes = 0;
     while (sent_bytes < bytes_C2G_per_batch) {
       int C2G_bytes_this_iter = (bytes_C2G_per_batch - sent_bytes) < C2G_PKG_SIZE ? (bytes_C2G_per_batch - sent_bytes) : C2G_PKG_SIZE;
-      int C2G_bytes = send(sock_g2c, &buf_G2C[sent_bytes], C2G_bytes_this_iter, 0);
+      int C2G_bytes = send(sock_g2c, &buf_C2G[sent_bytes], C2G_bytes_this_iter, 0);
       sent_bytes += C2G_bytes;
       if (C2G_bytes == -1) {
         printf("Sending data UNSUCCESSFUL!\n");
@@ -585,40 +592,44 @@ public:
     // otherwise the C2Fer may send packets yet the server did not receive.
 
     size_t n_bytes_top_k = batch_size * bit_byte_const::byte_int;
-    size_t n_bytes_vector_ids = batch_size * TOPK * (bit_byte_const::byte_long_int);
-    size_t n_bytes_distances = batch_size * TOPK * (bit_byte_const::byte_float);
+    size_t n_bytes_vector_ids = batch_size * FPGA_TOPK * (bit_byte_const::byte_long_int);
+    size_t n_bytes_distances = batch_size * FPGA_TOPK * (bit_byte_const::byte_float);
 
     int *top_k_buf = (int *)malloc(n_bytes_top_k);
     long *vector_ids_buf = (long *)malloc(n_bytes_vector_ids);
     float *distances_buf = (float *)malloc(n_bytes_distances);
 
     size_t byte_offset_vector_ids_buf = num_packages::AXI_size_F2C_header * bit_byte_const::byte_AXI;
-    size_t byte_offset_distances_buf = (num_packages::AXI_size_F2C_header + num_packages::AXI_size_F2C_vec_ID(TOPK)) * bit_byte_const::byte_AXI;
+    size_t byte_offset_distances_buf = (num_packages::AXI_size_F2C_header + num_packages::AXI_size_F2C_vec_ID(FPGA_TOPK)) * bit_byte_const::byte_AXI;
 
     std::chrono::system_clock::time_point start = std::chrono::system_clock::now(); // reset after recving the first query
 
     // TODO: find a good way to signal to this thread that terminate signal was received and when the last batch is received.
     for (int F2C_batch_id = 0; F2C_batch_id < total_batch_num; F2C_batch_id++) {
 
-      std::cout << "F2C_C2G_batch_id: " << F2C_batch_id << std::endl;
+      std::cout << "F2C & C2G batch_id: " << F2C_batch_id << std::endl;
 
       for (int query_id = 0; query_id < batch_size; query_id++) {
 
         receive_F2C_batch_result();
 
-        // Each query received consists of [header] [topk x ids] [topk x dists] all three padded to the next AXI packet size
+        // Each query received consists of [header] [FPGA_TOPK x ids] [FPGA_TOPK x dists] all three padded to the next AXI packet size
         // We copy all answers into the same array such that the GPU can simply interpret it at as a 2D array
         memcpy(top_k_buf + query_id, buf_F2C, 4);
-        memcpy(vector_ids_buf + query_id * TOPK, buf_F2C + byte_offset_vector_ids_buf, TOPK * (bit_byte_const::bit_long_int / 8));
-        memcpy(distances_buf + query_id * TOPK, buf_F2C + byte_offset_distances_buf, TOPK * (bit_byte_const::bit_float / 8));
+        memcpy(vector_ids_buf + query_id * FPGA_TOPK, buf_F2C + byte_offset_vector_ids_buf, FPGA_TOPK * (bit_byte_const::bit_long_int / 8));
+        memcpy(distances_buf + query_id * FPGA_TOPK, buf_F2C + byte_offset_distances_buf, FPGA_TOPK * (bit_byte_const::bit_float / 8));
+		
+		    // TODO: potentially also cp to the C2G buffer here
 
-        send_C2G_batch_result();
-
-        finish_F2C_C2G_query_id++;
-        std::cout << "F2C finish query_id " << finish_F2C_C2G_query_id << std::endl;
+        finish_F2C_query_id++;
+        std::cout << "F2C finish query_id " << finish_F2C_query_id << std::endl;
         // sem_post() increments (unlocks) the semaphore pointed to by sem
         sem_post(&sem_query_window_free_slots);
       }
+      
+      send_C2G_batch_result();
+      std::cout << "G2C finish batch_id " << F2C_batch_id << std::endl;
+
       batch_finish_time_array[F2C_batch_id] = std::chrono::system_clock::now();
       sem_post(&sem_batch_window_free_slots);
     }
@@ -696,8 +707,8 @@ int main(int argc, char const *argv[])
   	" <L=num_FPGA FPGA_IP_addrs> " 
     " <L=num_FPGA C2F_ports> " 
     " <L=num_FPGA F2C_ports> "
-    " <L=1 D> <L=1 TOPK> <L=1 batch_size> "
-    " <L=1 total_batch_num> <L=1 nprobe> <L=1 nlist>"
+    " <L=1 D> <L=1 CPU_TOPK> <L=1 batch_size> "
+    " <L=1 total_batch_num> <L=1 nprobe> "
     " <L=1 query_window_size> <L=1 batch_window_size>" << std::endl;
 
   int argv_cnt = 1;
@@ -707,7 +718,7 @@ int main(int argc, char const *argv[])
   
   int num_FPGA = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "num_FPGA: " << num_FPGA << std::endl;
-  assert(argc == 11 + 3 * num_FPGA);
+  assert(argc == 10 + 3 * num_FPGA);
   assert(num_FPGA <= MAX_FPGA_NUM);
 
 
@@ -737,8 +748,8 @@ int main(int argc, char const *argv[])
   size_t D = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "D: " << D << std::endl;
 
-  size_t TOPK = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "TOPK: " << TOPK << std::endl;
+  size_t CPU_TOPK = strtol(argv[argv_cnt++], NULL, 10);
+  std::cout << "CPU_TOPK: " << CPU_TOPK << std::endl;
 
   int batch_size = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "batch_size: " << batch_size << std::endl;
@@ -748,9 +759,6 @@ int main(int argc, char const *argv[])
 
   int nprobe = strtol(argv[argv_cnt++], NULL, 10);
   std::cout << "nprobe: " << nprobe << std::endl;
-
-  int nlist = strtol(argv[argv_cnt++], NULL, 10);
-  std::cout << "nlist: " << nlist << std::endl;
     
   // how many queries are allow to send ahead of receiving results
   // e.g., when query_window_size = 1 (which is the min), query 2 cannot be sent without receiving result 1
@@ -770,11 +778,10 @@ int main(int argc, char const *argv[])
     
   CPUCoordinator cpu_coordinator(
     D,
-    TOPK, 
+    CPU_TOPK, 
     batch_size,
     total_batch_num,
     nprobe,
-    nlist,
     query_window_size,
     batch_window_size,
     num_FPGA,

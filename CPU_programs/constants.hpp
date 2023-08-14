@@ -5,6 +5,8 @@
 #define G2C_PKG_SIZE 4096 
 #define C2G_PKG_SIZE 4096 
 
+#define FPGA_TOPK 100
+
 namespace bit_byte_const {
 const size_t bit_int = 32;
 const size_t bit_float = 32;
