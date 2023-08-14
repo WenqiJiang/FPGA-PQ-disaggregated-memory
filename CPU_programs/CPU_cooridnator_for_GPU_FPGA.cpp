@@ -34,7 +34,6 @@
 #include <iostream>
 #include <mutex>
 #include <pthread.h>
-#include <semaphore.h>
 #include <semaphore>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +42,7 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <netinet/tcp.h>
 
 #include "constants.hpp"
 // #include "hnswlib_omp/hnswlib.h"
@@ -257,6 +257,12 @@ public:
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
     perror("setsockopt");
     exit(EXIT_FAILURE);
+    }      
+    // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+    int yes = 1;
+    if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
+      perror("setsockopt");
+      exit(EXIT_FAILURE);
     }
 
     address.sin_family = AF_INET;
@@ -287,7 +293,7 @@ public:
       int G2C_bytes_this_iter = (bytes_G2C_per_batch - total_G2C_bytes) < G2C_PKG_SIZE ?  (bytes_G2C_per_batch - total_G2C_bytes) : G2C_PKG_SIZE;
       int G2C_bytes = read(sock_g2c, &buf_G2C[total_G2C_bytes], G2C_bytes_this_iter);
       total_G2C_bytes += G2C_bytes;
-      
+
       if (G2C_bytes == -1) {
         printf("receive_G2C_batch_query Receiving data UNSUCCESSFUL!\n");
         return;
@@ -341,6 +347,12 @@ public:
       if ((sock_c2f[n] = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         printf("\n Socket creation error \n");
         return;
+      }
+      // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+      int yes = 1;
+      if (setsockopt(sock_c2f[n], IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
       }
 
       serv_addr.sin_family = AF_INET;
@@ -511,6 +523,12 @@ public:
         exit(EXIT_FAILURE);
       }
       if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+      }      
+      // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+      int yes = 1;
+      if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
       }

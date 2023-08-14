@@ -43,8 +43,10 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <netinet/tcp.h>
 
 #include "constants.hpp"
+// #include "my_semaphore.hpp"
 #include "hnswlib_omp/hnswlib.h"
 
 // #define DEBUG // uncomment to activate debug print-statements
@@ -64,6 +66,7 @@
 #define F2C_C2G_QUEUE_SIZE 10 // size of producer-consumer-queue buffer between F2C and C2G
 
 #define MAX_FPGA_NUM 16
+
 
 class CPUCoordinator {
 
@@ -98,6 +101,9 @@ public:
   sem_t sem_query_window_free_slots; // available slots in the query window, cnt = query_window_size - (C2F_query_id - F2C_query_id)
   // used by index thread & C2F thread to control send rate:
   sem_t sem_available_batches_to_send; // index scanned, yet not sent batches
+  // MySemaphore sem_batch_window_free_slots; // available slots in the batch window, cnt = batch_window_size - (C2F_batch_id - F2C_batch_id)
+  // MySemaphore sem_query_window_free_slots; // available slots in the query window, cnt = query_window_size - (C2F_query_id - F2C_query_id)
+  // MySemaphore sem_available_batches_to_send; // index scanned, yet not sent batches
 
   unsigned int C2F_send_index;
   unsigned int F2C_rcv_index;
@@ -196,11 +202,14 @@ public:
     F2C_rcv_index = 0;
     terminate = 0;
     C2F_batch_id = -1;
-    // F2C_batch_id = -1;
-    // F2C_batch_finish = 1; // set to one to allow first C2F iteration run
+	
     sem_init(&sem_query_window_free_slots, 0, query_window_size); // 0 = share between threads of a process
     sem_init(&sem_batch_window_free_slots, 0, batch_window_size); // 0 = share between threads of a process
     sem_init(&sem_available_batches_to_send, 0, 0); // 0 = share between threads of a process
+
+	// sem_query_window_free_slots = MySemaphore(query_window_size);
+	// sem_batch_window_free_slots = MySemaphore(batch_window_size);
+	// sem_available_batches_to_send = MySemaphore(0);
 
     // C2F sizes
     bytes_C2F_header = num_packages::AXI_size_C2F_header * bit_byte_const::byte_AXI;
@@ -262,8 +271,9 @@ public:
     for (int index_scan_batch_id = 0; index_scan_batch_id < total_batch_num; index_scan_batch_id++) {
 
       std::cout << "index_scan_batch_id: " << index_scan_batch_id << std::endl;
-      
+        
       sem_wait(&sem_batch_window_free_slots);
+      // sem_batch_window_free_slots.consume();
       batch_start_time_array[index_scan_batch_id] = std::chrono::system_clock::now();
       if (enable_index_scan) {
         auto results_batch_serial_queue =
@@ -271,7 +281,8 @@ public:
         // TODO: put results somewhere
       }
       sem_post(&sem_available_batches_to_send);
-	  }
+	    // sem_available_batches_to_send.produce();
+	}
 
 
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
@@ -295,6 +306,12 @@ public:
       if ((sock_c2f[n] = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         printf("\n Socket creation error \n");
         return;
+      }
+      // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+      int yes = 1;
+      if (setsockopt(sock_c2f[n], IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
       }
 
       serv_addr.sin_family = AF_INET;
@@ -410,7 +427,7 @@ public:
       if (terminate) {
         break;
       }
-      
+      // sem_available_batches_to_send.consume();
       sem_wait(&sem_available_batches_to_send);
 
       for (int query_id = 0; query_id < batch_size; query_id++) {
@@ -419,6 +436,7 @@ public:
         // If the  semaphore currently has the value zero, then the call blocks
         //   until either it becomes possible to perform the decrement
         sem_wait(&sem_query_window_free_slots);
+		// sem_query_window_free_slots.consume();
 
 
         float *current_query = query_batch + (query_id * D);
@@ -465,6 +483,12 @@ public:
         exit(EXIT_FAILURE);
       }
       if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+      }
+      // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+      int yes = 1;
+      if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
       }
@@ -562,9 +586,11 @@ public:
         std::cout << "F2C finish query_id " << finish_F2C_query_id << std::endl;
         // sem_post() increments (unlocks) the semaphore pointed to by sem
         sem_post(&sem_query_window_free_slots);
+		// sem_query_window_free_slots.produce();
       }
       batch_finish_time_array[F2C_batch_id] = std::chrono::system_clock::now();
       sem_post(&sem_batch_window_free_slots);
+	  // sem_batch_window_free_slots.produce();
     }
 
   std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
@@ -610,6 +636,9 @@ public:
     std::cout << "  Max (ms): " << sorted_duration_ms.back() << std::endl;
     std::cout << "  Medium (ms): " << sorted_duration_ms.at(total_batch_num / 2) << std::endl;
     std::cout << "  Average (ms): " << ave_ms << std::endl;
+    // for (int b = 0; b < total_batch_num; b++) {
+    //   std::cout << "  Batch " << b << " (ms): " << batch_duration_ms_array[b] << std::endl;
+    // }
 
 
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(

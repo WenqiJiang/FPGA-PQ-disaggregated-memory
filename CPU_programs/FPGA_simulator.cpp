@@ -19,13 +19,16 @@
 #include <unistd.h>
 #include <chrono>
 #include <thread>
+#include <semaphore>
 #include <iostream>
 #include <vector>
 #include <fstream>
 #include <cassert>
 #include <algorithm>
+#include <netinet/tcp.h>
 
 #include "constants.hpp"
+// #include "my_semaphore.hpp"
 #include "utils.hpp"
 
 #define MAX_BATCH_NUM (1000 * 1000)
@@ -69,6 +72,12 @@ public:
     int terminate;	
     int C2F_batch_id;
     int F2C_batch_id;
+
+	// available results to send
+  	sem_t sem_available_results; // once receiving a query, ++, once send out a result, --
+	sem_t sem_available_batches; // once start to receiving a batch, ++, once start to sending out a batch, --
+	// MySemaphore sem_available_results;
+	// MySemaphore sem_available_batches;
 
     // bit & byte const
     const size_t bit_int = 32; 
@@ -123,6 +132,11 @@ public:
         C2F_batch_id = -1;
         F2C_batch_id = -1;
 
+    	sem_init(&sem_available_results, 0, 0); // 0 = share between threads of a process
+    	sem_init(&sem_available_batches, 0, 0); // 0 = share between threads of a process
+		// sem_available_results = MySemaphore(0);
+		// sem_available_batches = MySemaphore(0);
+
         // C2F sizes
         AXI_size_C2F_header = 1;
         AXI_size_C2F_query_vector = D * bit_float % bit_AXI == 0? D * bit_float / bit_AXI : D * bit_float / bit_AXI + 1; 
@@ -166,6 +180,12 @@ public:
             perror("setsockopt");
             exit(EXIT_FAILURE);
         }
+        // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+		int yes = 1;
+		if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
+			perror("setsockopt");
+			exit(EXIT_FAILURE);
+		}
 
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = INADDR_ANY;
@@ -221,6 +241,10 @@ public:
             int terminate = decode_int(header_buf + 8);
 			memcpy(buf_header + (C2F_batch_id + 1) * byte_AXI, header_buf, bytes_C2F_header);
             C2F_batch_id++; // mark it as valid only when header buffer copy finished
+
+			sem_post(&sem_available_batches);
+			// sem_available_batches.produce();
+
             if (terminate) {
                 break;
             }
@@ -252,6 +276,9 @@ public:
                 // set shared register as soon as the first packet of the results is received
                 finish_C2F_query_id++; 
 				std::cout << "finish_C2F_query_id: " << finish_C2F_query_id << std::endl;
+				
+				sem_post(&sem_available_results); // notify the F2C thread that there is a result to send
+				// sem_available_results.produce();
 
                 if (total_C2F_bytes != bytes_C2F_per_query) {
                     printf("Receiving error, receiving more bytes than a block\n");
@@ -280,6 +307,13 @@ public:
             printf("\n Socket creation error \n"); 
             return; 
         } 
+        // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+		int yes = 1;
+		if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
+			perror("setsockopt");
+			exit(EXIT_FAILURE);
+		}
+
         std::cout << "F2C sock " << sock << std::endl; 
     
         serv_addr.sin_family = AF_INET; 
@@ -310,8 +344,11 @@ public:
         while (true) {
 
             F2C_batch_id++;
-            while (C2F_batch_id < F2C_batch_id) {}
+			
+			sem_wait(&sem_available_batches);
+			// sem_available_batches.consume();
 			char header_buf[byte_AXI];
+
 			memcpy(header_buf, buf_header + F2C_batch_id * byte_AXI, bytes_C2F_header);
             int batch_size = decode_int(header_buf);
             int nprobe = decode_int(header_buf + 4);
@@ -323,7 +360,8 @@ public:
 
             for (int query_id = 0; query_id < batch_size; query_id++) {
 
-                while ((finish_F2C_query_id + 1) > finish_C2F_query_id) {}
+				sem_wait(&sem_available_results); // wait for available results
+				// sem_available_results.consume();
 
                 // send data
                 size_t total_sent_bytes = 0;
