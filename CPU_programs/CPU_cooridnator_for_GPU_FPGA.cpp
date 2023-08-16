@@ -1,18 +1,18 @@
 /* Host CPU communicates with one or multiple FPGAs and one GPU cooridnator,
-	it forward the query & centroid vectors and received from the GPU coordinator, and broadcast them to the FPGAs
+  it forward the query & centroid vectors and received from the GPU coordinator, and broadcast them to the FPGAs
 
   3 threads: 
-   	1 for receiving query (G2C)
+     1 for receiving query (G2C)
     1 for sending query (C2F)
     1 for receiving and forwarding results (F2C & C2G)
-	
+  
 
  Usage (e.g.):
 
   std::cout << "Usage: " << argv[0] << 
-	" <L=1 G2C_port> "
-  	" <L=1 num_FPGA> "
-  	" <L=num_FPGA FPGA_IP_addrs> " 
+  " <L=1 G2C_port> "
+    " <L=1 num_FPGA> "
+    " <L=num_FPGA FPGA_IP_addrs> " 
     " <L=num_FPGA C2F_ports> " 
     " <L=num_FPGA F2C_ports> "
     " <L=1 D> <L=1 CPU_TOPK> <L=1 batch_size> "
@@ -179,7 +179,7 @@ public:
     const char** in_FPGA_IP_addrs,
     const unsigned int* in_C2F_ports,
     const unsigned int* in_F2C_ports,
-	  const unsigned int in_G2C_port) :
+    const unsigned int in_G2C_port) :
     D(in_D), CPU_TOPK(in_CPU_TOPK), batch_size(in_batch_size), total_batch_num(in_total_batch_num),
     nprobe(in_nprobe), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
     num_FPGA(in_num_FPGA), FPGA_IP_addrs(in_FPGA_IP_addrs), C2F_ports(in_C2F_ports), F2C_ports(in_F2C_ports), G2C_port(in_G2C_port) {
@@ -214,13 +214,14 @@ public:
     // F2C sizes
     size_t AXI_size_F2C = num_packages::AXI_size_F2C_header + num_packages::AXI_size_F2C_vec_ID(FPGA_TOPK) + num_packages::AXI_size_F2C_dist(FPGA_TOPK);
     bytes_F2C_per_query = bit_byte_const::byte_AXI * AXI_size_F2C; // expected bytes received per query including header
-	  bytes_F2C_per_batch = bytes_F2C_per_query * batch_size;
+    bytes_F2C_per_batch = bytes_F2C_per_query * batch_size;
     // std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;
-	  std::cout << "bytes_F2C_per_batch: " << bytes_F2C_per_batch << std::endl;
+    std::cout << "bytes_F2C_per_batch: " << bytes_F2C_per_batch << std::endl;
 
     // G2C sizes
-    bytes_G2C_per_batch = bytes_C2F_per_batch;
-	  bytes_C2G_per_query = bit_byte_const::byte_long_int * CPU_TOPK + bit_byte_const::byte_float * CPU_TOPK;
+    // header: 16 bytes = batch_size, dim, nprobe, k, all in int32, queries: batch_size * dim * 4 bytes (float32), list_IDs: batch_size * nprobe * 8 bytes (int64)
+    bytes_G2C_per_batch = 16 + bit_byte_const::byte_float * batch_size * D + bit_byte_const::byte_long_int * batch_size * nprobe;
+    bytes_C2G_per_query = bit_byte_const::byte_long_int * CPU_TOPK + bit_byte_const::byte_float * CPU_TOPK;
     bytes_C2G_per_batch = batch_size * bytes_C2G_per_query;
 
     sock_f2c = (int*) malloc(num_FPGA * sizeof(int));
@@ -230,7 +231,7 @@ public:
     buf_C2F = (char*) malloc(bytes_C2F_body_per_query);
     buf_G2C = (char*) malloc(bytes_C2F_per_batch);
     buf_C2G = (char*) malloc(bytes_C2G_per_batch);
-	  std::cout << "bytes_C2G_per_batch: " << bytes_C2G_per_batch << std::endl;
+    std::cout << "bytes_C2G_per_batch: " << bytes_C2G_per_batch << std::endl;
 
     batch_start_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
     batch_finish_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
@@ -323,7 +324,7 @@ public:
       batch_start_time_array[g2c_batch_id] = std::chrono::system_clock::now();
       receive_G2C_batch_query();
       sem_post(&sem_available_batches_to_send);
-	  }
+    }
 
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
     double durationUs = (std::chrono::duration_cast<std::chrono::microseconds>(end-start).count());
@@ -636,8 +637,8 @@ public:
         memcpy(top_k_buf + query_id, buf_F2C, 4);
         memcpy(vector_ids_buf + query_id * FPGA_TOPK, buf_F2C + byte_offset_vector_ids_buf, FPGA_TOPK * (bit_byte_const::bit_long_int / 8));
         memcpy(distances_buf + query_id * FPGA_TOPK, buf_F2C + byte_offset_distances_buf, FPGA_TOPK * (bit_byte_const::bit_float / 8));
-		
-		    // TODO: potentially also cp to the C2G buffer here
+    
+        // TODO: potentially also cp to the C2G buffer here
 
         finish_F2C_query_id++;
         std::cout << "F2C finish query_id " << finish_F2C_query_id << std::endl;
@@ -720,9 +721,9 @@ int main(int argc, char const *argv[])
 { 
   //////////     Parameter Init     //////////  
   std::cout << "Usage: " << argv[0] << 
-	" <L=1 G2C_port> "
-  	" <L=1 num_FPGA> "
-  	" <L=num_FPGA FPGA_IP_addrs> " 
+  " <L=1 G2C_port> "
+    " <L=1 num_FPGA> "
+    " <L=num_FPGA FPGA_IP_addrs> " 
     " <L=num_FPGA C2F_ports> " 
     " <L=num_FPGA F2C_ports> "
     " <L=1 D> <L=1 CPU_TOPK> <L=1 batch_size> "
@@ -806,7 +807,7 @@ int main(int argc, char const *argv[])
     FPGA_IP_addrs,
     C2F_ports,
     F2C_ports,
-	G2C_port);
+  G2C_port);
 
   cpu_coordinator.start_C2F_F2C_threads();
   cpu_coordinator.calculate_latency();
