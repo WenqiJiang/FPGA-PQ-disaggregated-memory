@@ -4,7 +4,7 @@
  Usage (e.g.):
 
   std::cout << "Usage: " << argv[0] << " <1 num_FPGA> "
-  	"<2 ~ 2 + num_FPGA - 1 FPGA_IP_addr> " 
+      "<2 ~ 2 + num_FPGA - 1 FPGA_IP_addr> " 
     "<2 + num_FPGA ~ 2 + 2 * num_FPGA - 1 C2F_port> " 
     "<2 + 2 * num_FPGA ~ 2 + 3 * num_FPGA - 1 F2C_port> "
     "<2 + 3 * num_FPGA D> <3 + 3 * num_FPGA TOPK> <4 + 3 * num_FPGA batch_size> "
@@ -15,13 +15,13 @@
   Single FPGA example:
      # no index scan
      ./CPU_to_FPGA 1 10.253.74.24 8881 5001 128 100 32 100 16 10 0
-	 # with index scan
+     # with index scan
      ./CPU_to_FPGA 1 10.253.74.24 8881 5001 128 100 32 100 16 10 1 8
   
   Two FPGAs example:
-	 # no index scan
+     # no index scan
      ./CPU_to_FPGA 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 16 10 0
-	 # with index scan
+     # with index scan
      ./CPU_to_FPGA 2 10.253.74.24 10.253.74.28 8881 8882 5001 5002 128 100 32 100 16 10 1 8
 
 */
@@ -184,7 +184,7 @@ public:
     const unsigned int* in_C2F_port,
     const unsigned int* in_F2C_port,
     const int in_enable_index_scan,
-	  const int in_omp_threads) :
+      const int in_omp_threads) :
     D(in_D), TOPK(in_TOPK), batch_size(in_batch_size), total_batch_num(in_total_batch_num),
     nprobe(in_nprobe), nlist(in_nlist), query_window_size(in_query_window_size), batch_window_size(in_batch_window_size),
     num_FPGA(in_num_FPGA), FPGA_IP_addr(in_FPGA_IP_addr), C2F_port(in_C2F_port), F2C_port(in_F2C_port), 
@@ -202,14 +202,14 @@ public:
     F2C_rcv_index = 0;
     terminate = 0;
     C2F_batch_id = -1;
-	
+    
     sem_init(&sem_query_window_free_slots, 0, query_window_size); // 0 = share between threads of a process
     sem_init(&sem_batch_window_free_slots, 0, batch_window_size); // 0 = share between threads of a process
     sem_init(&sem_available_batches_to_send, 0, 0); // 0 = share between threads of a process
 
-	// sem_query_window_free_slots = MySemaphore(query_window_size);
-	// sem_batch_window_free_slots = MySemaphore(batch_window_size);
-	// sem_available_batches_to_send = MySemaphore(0);
+    // sem_query_window_free_slots = MySemaphore(query_window_size);
+    // sem_batch_window_free_slots = MySemaphore(batch_window_size);
+    // sem_available_batches_to_send = MySemaphore(0);
 
     // C2F sizes
     bytes_C2F_header = num_packages::AXI_size_C2F_header * bit_byte_const::byte_AXI;
@@ -281,8 +281,8 @@ public:
         // TODO: put results somewhere
       }
       sem_post(&sem_available_batches_to_send);
-	    // sem_available_batches_to_send.produce();
-	}
+        // sem_available_batches_to_send.produce();
+    }
 
 
     std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
@@ -312,6 +312,13 @@ public:
       if (setsockopt(sock_c2f[n], IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
+      }
+      int opt = 1;
+      if (setsockopt(sock_c2f[n], SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+          perror("setsockopt(SO_REUSEADDR) failed");
+      }
+      if (setsockopt(sock_c2f[n], SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+          perror("setsockopt(SO_REUSEPORT) failed");
       }
 
       serv_addr.sin_family = AF_INET;
@@ -436,7 +443,7 @@ public:
         // If the  semaphore currently has the value zero, then the call blocks
         //   until either it becomes possible to perform the decrement
         sem_wait(&sem_query_window_free_slots);
-		// sem_query_window_free_slots.consume();
+        // sem_query_window_free_slots.consume();
 
 
         float *current_query = query_batch + (query_id * D);
@@ -482,9 +489,11 @@ public:
         perror("socket failed");
         exit(EXIT_FAILURE);
       }
-      if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
+      if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+          perror("setsockopt(SO_REUSEADDR) failed");
+      }
+      if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+          perror("setsockopt(SO_REUSEPORT) failed");
       }
       // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
       int yes = 1;
@@ -586,11 +595,11 @@ public:
         std::cout << "F2C finish query_id " << finish_F2C_query_id << std::endl;
         // sem_post() increments (unlocks) the semaphore pointed to by sem
         sem_post(&sem_query_window_free_slots);
-		// sem_query_window_free_slots.produce();
+        // sem_query_window_free_slots.produce();
       }
       batch_finish_time_array[F2C_batch_id] = std::chrono::system_clock::now();
       sem_post(&sem_batch_window_free_slots);
-	  // sem_batch_window_free_slots.produce();
+      // sem_batch_window_free_slots.produce();
     }
 
   std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
@@ -664,7 +673,7 @@ int main(int argc, char const *argv[])
 { 
   //////////     Parameter Init     //////////  
   std::cout << "Usage: " << argv[0] << " <1 num_FPGA> "
-  	"<2 ~ 2 + num_FPGA - 1 FPGA_IP_addr> " 
+      "<2 ~ 2 + num_FPGA - 1 FPGA_IP_addr> " 
     "<2 + num_FPGA ~ 2 + 2 * num_FPGA - 1 C2F_port> " 
     "<2 + 2 * num_FPGA ~ 2 + 3 * num_FPGA - 1 F2C_port> "
     "<2 + 3 * num_FPGA D> <3 + 3 * num_FPGA TOPK> <4 + 3 * num_FPGA batch_size> "

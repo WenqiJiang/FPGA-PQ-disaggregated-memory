@@ -2,7 +2,7 @@
 //   2 thread, 1 for sending results, 1 for receiving queries
 
 // Usage (e.g.): ./FPGA_simulator 10.253.74.5 5001 8881 128 100
-//  "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx F2C_port> <3 Rx C2F_port> <4 D> <5 TOPK>"
+//  "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx F2C_port> <3 Rx C2F_port> <4 D> <5 FPGA_TOPK>"
 
 // Network order:
 //   Open host_single_thread (CPU) first
@@ -56,14 +56,14 @@ public:
 
     const size_t D;  
     const size_t TOPK; 
-	const size_t max_batch_num; // need to allocate a buffer to store the header states
+    const size_t max_batch_num; // need to allocate a buffer to store the header states
 
     const char* CPU_IP_addr; 
     const unsigned int F2C_port; // FPGA send, CPU receive
     const unsigned int C2F_port; // FPGA recv, CPU send
     
     // states during data transfer
-	int finish_F2C_query_id;
+    int finish_F2C_query_id;
     int finish_C2F_query_id;
     bool start_F2C;
     bool start_C2F;
@@ -73,11 +73,11 @@ public:
     int C2F_batch_id;
     int F2C_batch_id;
 
-	// available results to send
-  	sem_t sem_available_results; // once receiving a query, ++, once send out a result, --
-	sem_t sem_available_batches; // once start to receiving a batch, ++, once start to sending out a batch, --
-	// MySemaphore sem_available_results;
-	// MySemaphore sem_available_batches;
+    // available results to send
+      sem_t sem_available_results; // once receiving a query, ++, once send out a result, --
+    sem_t sem_available_batches; // once start to receiving a batch, ++, once start to sending out a batch, --
+    // MySemaphore sem_available_results;
+    // MySemaphore sem_available_batches;
 
     // bit & byte const
     const size_t bit_int = 32; 
@@ -100,12 +100,12 @@ public:
     size_t AXI_size_F2C;
 
     // size in bytes
-	size_t bytes_C2F_header;
+    size_t bytes_C2F_header;
     size_t bytes_F2C_per_query;
     size_t bytes_C2F_per_query;
 
-	// header states
-	char* buf_header;
+    // header states
+    char* buf_header;
 
     // C2F & F2C buffers, length = single query
     char* buf_F2C; 
@@ -115,7 +115,7 @@ public:
     FPGARetriever(
         const size_t in_D,
         const size_t in_TOPK,
-		const size_t in_max_batch_num,
+        const size_t in_max_batch_num,
         const char* in_CPU_IP_addr,
         const unsigned int in_F2C_port,
         const unsigned int in_C2F_port) :
@@ -132,10 +132,10 @@ public:
         C2F_batch_id = -1;
         F2C_batch_id = -1;
 
-    	sem_init(&sem_available_results, 0, 0); // 0 = share between threads of a process
-    	sem_init(&sem_available_batches, 0, 0); // 0 = share between threads of a process
-		// sem_available_results = MySemaphore(0);
-		// sem_available_batches = MySemaphore(0);
+        sem_init(&sem_available_results, 0, 0); // 0 = share between threads of a process
+        sem_init(&sem_available_batches, 0, 0); // 0 = share between threads of a process
+        // sem_available_results = MySemaphore(0);
+        // sem_available_batches = MySemaphore(0);
 
         // C2F sizes
         AXI_size_C2F_header = 1;
@@ -150,7 +150,7 @@ public:
             TOPK * bit_float / bit_AXI : TOPK * bit_float / bit_AXI + 1;
         AXI_size_F2C = AXI_size_F2C_header + AXI_size_F2C_vec_ID + AXI_size_F2C_dist; 
 
-		bytes_C2F_header = AXI_size_F2C_header * byte_AXI;
+        bytes_C2F_header = AXI_size_F2C_header * byte_AXI;
         bytes_F2C_per_query = byte_AXI * AXI_size_F2C;
         std::cout << "bytes_F2C_per_query: " << bytes_F2C_per_query << std::endl;
 
@@ -175,17 +175,18 @@ public:
             perror("socket failed");
             exit(EXIT_FAILURE);
         }
-        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR , &opt, sizeof(opt)))
-        {
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+            perror("setsockopt(SO_REUSEADDR) failed");
+        }
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+            perror("setsockopt(SO_REUSEPORT) failed");
+        }
+        // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
+        int yes = 1;
+        if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
             perror("setsockopt");
             exit(EXIT_FAILURE);
         }
-        // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
-		int yes = 1;
-		if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
-			perror("setsockopt");
-			exit(EXIT_FAILURE);
-		}
 
         address.sin_family = AF_INET;
         address.sin_addr.s_addr = INADDR_ANY;
@@ -223,7 +224,7 @@ public:
         // otherwise the sender may send packets yet the server did not receive.
 
         while (true) {
-					 
+                     
             // recv batch header 
             char header_buf[bytes_C2F_header];
             size_t header_C2F_bytes = 0;
@@ -239,11 +240,11 @@ public:
             int batch_size = decode_int(header_buf);
             int nprobe = decode_int(header_buf + 4);
             int terminate = decode_int(header_buf + 8);
-			memcpy(buf_header + (C2F_batch_id + 1) * byte_AXI, header_buf, bytes_C2F_header);
+            memcpy(buf_header + (C2F_batch_id + 1) * byte_AXI, header_buf, bytes_C2F_header);
             C2F_batch_id++; // mark it as valid only when header buffer copy finished
 
-			sem_post(&sem_available_batches);
-			// sem_available_batches.produce();
+            sem_post(&sem_available_batches);
+            // sem_available_batches.produce();
 
             if (terminate) {
                 break;
@@ -251,8 +252,8 @@ public:
 
             AXI_size_C2F_cell_IDs = nprobe * bit_int % bit_AXI == 0? nprobe * bit_int / bit_AXI: nprobe * bit_int / bit_AXI + 1;
             bytes_C2F_per_query = byte_AXI * (AXI_size_C2F_cell_IDs + AXI_size_C2F_query_vector + nprobe * AXI_size_C2F_center_vector); // not consider header 
-			std::cout << "bytes_C2F_per_query (exclude 64-byte header) " << bytes_C2F_per_query << std::endl;
-			assert(bytes_C2F_per_query <= MAX_C2F_BUF_SIZE);
+            std::cout << "bytes_C2F_per_query (exclude 64-byte header) " << bytes_C2F_per_query << std::endl;
+            assert(bytes_C2F_per_query <= MAX_C2F_BUF_SIZE);
 
             // recv the batch 
             for (int query_id = 0; query_id < batch_size; query_id++) {
@@ -275,10 +276,10 @@ public:
                 }
                 // set shared register as soon as the first packet of the results is received
                 finish_C2F_query_id++; 
-				std::cout << "finish_C2F_query_id: " << finish_C2F_query_id << std::endl;
-				
-				sem_post(&sem_available_results); // notify the F2C thread that there is a result to send
-				// sem_available_results.produce();
+                std::cout << "finish_C2F_query_id: " << finish_C2F_query_id << std::endl;
+                
+                sem_post(&sem_available_results); // notify the F2C thread that there is a result to send
+                // sem_available_results.produce();
 
                 if (total_C2F_bytes != bytes_C2F_per_query) {
                     printf("Receiving error, receiving more bytes than a block\n");
@@ -307,12 +308,19 @@ public:
             printf("\n Socket creation error \n"); 
             return; 
         } 
+        int opt = 1;
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+            perror("setsockopt(SO_REUSEADDR) failed");
+        }
+        if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+            perror("setsockopt(SO_REUSEPORT) failed");
+        }
         // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
-		int yes = 1;
-		if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
-			perror("setsockopt");
-			exit(EXIT_FAILURE);
-		}
+        int yes = 1;
+        if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
+            perror("setsockopt");
+            exit(EXIT_FAILURE);
+        }
 
         std::cout << "F2C sock " << sock << std::endl; 
     
@@ -344,24 +352,24 @@ public:
         while (true) {
 
             F2C_batch_id++;
-			
-			sem_wait(&sem_available_batches);
-			// sem_available_batches.consume();
-			char header_buf[byte_AXI];
+            
+            sem_wait(&sem_available_batches);
+            // sem_available_batches.consume();
+            char header_buf[byte_AXI];
 
-			memcpy(header_buf, buf_header + F2C_batch_id * byte_AXI, bytes_C2F_header);
+            memcpy(header_buf, buf_header + F2C_batch_id * byte_AXI, bytes_C2F_header);
             int batch_size = decode_int(header_buf);
             int nprobe = decode_int(header_buf + 4);
             int terminate = decode_int(header_buf + 8);
-			
+            
             if (terminate) {
                 break;
             }
 
             for (int query_id = 0; query_id < batch_size; query_id++) {
 
-				sem_wait(&sem_available_results); // wait for available results
-				// sem_available_results.consume();
+                sem_wait(&sem_available_results); // wait for available results
+                // sem_available_results.consume();
 
                 // send data
                 size_t total_sent_bytes = 0;
@@ -383,8 +391,8 @@ public:
                 if (total_sent_bytes != bytes_F2C_per_query) {
                     printf("Sending error, sending more bytes than a block\n");
                 }
-				finish_F2C_query_id++;
-				std::cout << "finish_F2C_query_id: " << finish_F2C_query_id << std::endl;
+                finish_F2C_query_id++;
+                std::cout << "finish_F2C_query_id: " << finish_F2C_query_id << std::endl;
             }
         }
         return; // end F2C thread
@@ -409,7 +417,7 @@ int main(int argc, char const *argv[])
     
     std::cout << "Usage: " << argv[0] << " <1 CPU_IP_addr> <2 F2C_port> <3 C2F_port> <4 D> <5 TOPK>" << std::endl;
 
-	std::cout << "The maximum number of batches the FPGA simulator can handle: " << MAX_BATCH_NUM << std::endl;
+    std::cout << "The maximum number of batches the FPGA simulator can handle: " << MAX_BATCH_NUM << std::endl;
 
     const char* CPU_IP_addr;
     if (argc >= 2)
@@ -436,20 +444,20 @@ int main(int argc, char const *argv[])
     {
         D = strtol(argv[4], NULL, 10);
     } 
-	std::cout << "D: " << D << std::endl;
+    std::cout << "D: " << D << std::endl;
 
     size_t TOPK = 100;
     if (argc >= 6)
     {
         TOPK = strtol(argv[5], NULL, 10);
     } 
-	std::cout << "TOPK: " << TOPK << std::endl;
+    std::cout << "TOPK: " << TOPK << std::endl;
 
 
     FPGARetriever retriever(
         D,
         TOPK,
-		MAX_BATCH_NUM, 
+        MAX_BATCH_NUM, 
         CPU_IP_addr,
         F2C_port,
         C2F_port);

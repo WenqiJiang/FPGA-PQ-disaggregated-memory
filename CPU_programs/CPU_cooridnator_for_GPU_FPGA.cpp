@@ -255,15 +255,17 @@ public:
     perror("socket failed");
     exit(EXIT_FAILURE);
     }
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-    perror("setsockopt");
-    exit(EXIT_FAILURE);
-    }      
     // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
     int yes = 1;
     if (setsockopt(server_fd, IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
       perror("setsockopt");
       exit(EXIT_FAILURE);
+    }
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+        perror("setsockopt(SO_REUSEADDR) failed");
+    }
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+        perror("setsockopt(SO_REUSEPORT) failed");
     }
 
     address.sin_family = AF_INET;
@@ -351,9 +353,16 @@ public:
       }
       // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
       int yes = 1;
+      int opt = 1;
       if (setsockopt(sock_c2f[n], IPPROTO_TCP, TCP_NODELAY, (char *) &yes, sizeof(int))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
+      }
+      if (setsockopt(sock_c2f[n], SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+          perror("setsockopt(SO_REUSEADDR) failed");
+      }
+      if (setsockopt(sock_c2f[n], SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+          perror("setsockopt(SO_REUSEPORT) failed");
       }
 
       serv_addr.sin_family = AF_INET;
@@ -523,9 +532,11 @@ public:
         perror("socket failed");
         exit(EXIT_FAILURE);
       }
-      if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
+      if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(int)) < 0) {
+        perror("setsockopt(SO_REUSEADDR) failed");
+      }
+      if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(int)) < 0) {
+        perror("setsockopt(SO_REUSEPORT) failed");
       }      
       // send sock, set immediately send out small msg: https://stackoverflow.com/questions/32274907/why-does-tcp-socket-slow-down-if-done-in-multiple-system-calls
       int yes = 1;
