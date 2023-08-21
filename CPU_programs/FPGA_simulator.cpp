@@ -2,7 +2,7 @@
 //   2 thread, 1 for sending results, 1 for receiving queries
 
 // Usage (e.g.): ./FPGA_simulator 10.253.74.5 5001 8881 128 100
-//  "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx F2C_port> <3 Rx C2F_port> <4 D> <5 FPGA_TOPK>"
+//  "Usage: " << argv[0] << " <1 Tx (CPU) CPU_IP_addr> <2 Tx F2C_port> <3 Rx C2F_port> <4 D>"
 
 // Network order:
 //   Open host_single_thread (CPU) first
@@ -47,15 +47,15 @@ class FPGARetriever {
 
     FPGA output (F2C) format:
     // Format: for each query
-    // packet 0: header (topK)
-    // packet 1~k: topK results, including vec_ID (8-byte) array and dist_array (4-byte)
-    //    -> size = ceil(topK * 8 / 64) + ceil(topK * 4 / 64)
+    // packet 0: header (FPGA_TOPK)
+    // packet 1~k: FPGA_TOPK results, including vec_ID (8-byte) array and dist_array (4-byte)
+    //    -> size = ceil(FPGA_TOPK * 8 / 64) + ceil(FPGA_TOPK * 4 / 64)
 */
 
 public:
 
     const size_t D;  
-    const size_t TOPK; 
+    const size_t FPGA_TOPK; 
     const size_t max_batch_num; // need to allocate a buffer to store the header states
 
     const char* CPU_IP_addr; 
@@ -114,12 +114,12 @@ public:
     // constructor
     FPGARetriever(
         const size_t in_D,
-        const size_t in_TOPK,
+        const size_t in_FPGA_TOPK,
         const size_t in_max_batch_num,
         const char* in_CPU_IP_addr,
         const unsigned int in_F2C_port,
         const unsigned int in_C2F_port) :
-        D(in_D), TOPK(in_TOPK), max_batch_num(in_max_batch_num), CPU_IP_addr(in_CPU_IP_addr), 
+        D(in_D), FPGA_TOPK(in_FPGA_TOPK), max_batch_num(in_max_batch_num), CPU_IP_addr(in_CPU_IP_addr), 
         F2C_port(in_F2C_port), C2F_port(in_C2F_port) {
 
         finish_F2C_query_id = -1;
@@ -144,10 +144,10 @@ public:
 
         // F2C sizes
         AXI_size_F2C_header = 1;
-        AXI_size_F2C_vec_ID = TOPK * bit_long_int % bit_AXI == 0?
-            TOPK * bit_long_int / bit_AXI : TOPK * bit_long_int / bit_AXI + 1;
-        AXI_size_F2C_dist = TOPK * bit_float % bit_AXI == 0?
-            TOPK * bit_float / bit_AXI : TOPK * bit_float / bit_AXI + 1;
+        AXI_size_F2C_vec_ID = FPGA_TOPK * bit_long_int % bit_AXI == 0?
+            FPGA_TOPK * bit_long_int / bit_AXI : FPGA_TOPK * bit_long_int / bit_AXI + 1;
+        AXI_size_F2C_dist = FPGA_TOPK * bit_float % bit_AXI == 0?
+            FPGA_TOPK * bit_float / bit_AXI : FPGA_TOPK * bit_float / bit_AXI + 1;
         AXI_size_F2C = AXI_size_F2C_header + AXI_size_F2C_vec_ID + AXI_size_F2C_dist; 
 
         bytes_C2F_header = AXI_size_F2C_header * byte_AXI;
@@ -415,7 +415,7 @@ int main(int argc, char const *argv[])
 { 
     //////////     Parameter Init     //////////
     
-    std::cout << "Usage: " << argv[0] << " <1 CPU_IP_addr> <2 F2C_port> <3 C2F_port> <4 D> <5 TOPK>" << std::endl;
+    std::cout << "Usage: " << argv[0] << " <1 CPU_IP_addr> <2 F2C_port> <3 C2F_port> <4 D>" << std::endl;
 
     std::cout << "The maximum number of batches the FPGA simulator can handle: " << MAX_BATCH_NUM << std::endl;
 
@@ -446,17 +446,10 @@ int main(int argc, char const *argv[])
     } 
     std::cout << "D: " << D << std::endl;
 
-    size_t TOPK = 100;
-    if (argc >= 6)
-    {
-        TOPK = strtol(argv[5], NULL, 10);
-    } 
-    std::cout << "TOPK: " << TOPK << std::endl;
-
 
     FPGARetriever retriever(
         D,
-        TOPK,
+        FPGA_TOPK,
         MAX_BATCH_NUM, 
         CPU_IP_addr,
         F2C_port,

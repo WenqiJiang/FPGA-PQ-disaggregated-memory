@@ -9,7 +9,7 @@
 // Variables that can be changed & should be set at compile time
 #define D 512
 #define M 32
-#define LUT_CONSTR_SUB_PE_NUM 16 // M must >= LUT_CONSTR_SUB_PE_NUM
+#define LUT_CONSTR_SUB_PE_NUM 8 // M must >= LUT_CONSTR_SUB_PE_NUM
 #define LUT_ENTRY_NUM 256
 #define ADC_DOUBLE_BUF_ENABLE 0 // 0 = disable, 1 = enable (might result in P&R failure)
 

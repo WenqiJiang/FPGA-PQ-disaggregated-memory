@@ -1,5 +1,8 @@
 # Specification
 
+## P & R issues
+
+While other kernels seem to be fine, `accelerator_D512_M32_batch` does not went through P & R. So we downgrade the number LUT_CONSTR_SUB_PE_NUM from 16 to 8, and choose the `Performance_BalanceSLLs` to fix the P & R issue. 
 ## Streaming Processing Kernels
 
 The only difference between SIFT 32 and Deep 32 kernels is the constant definition:

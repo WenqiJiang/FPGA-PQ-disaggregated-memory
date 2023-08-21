@@ -146,7 +146,8 @@ int main(int argc, char **argv) {
 
     ///////////     Part 2. Load Data     //////////
     
-    int64_t dbsize = 500 * 1000 * 1000;
+	// 2 B in 2 FPGAs
+    int64_t dbsize = 1000 * 1000 * 1000;
     std::cout << "DB size (in THIS SHARD): " << dbsize << "\tD: " << D << std::endl;
     
     //////////     Allocate Memory     //////////
