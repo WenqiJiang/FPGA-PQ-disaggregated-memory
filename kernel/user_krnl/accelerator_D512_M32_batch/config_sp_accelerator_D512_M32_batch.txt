@@ -53,8 +53,8 @@ sc=network_krnl_1.axis_net_tx:cmac_krnl_1.axis_net_tx
 # param=project.writeIntermediateCheckpoints=true
 
 # prop=run.impl_1.strategy=Performance_SpreadSLLs
-prop=run.impl_1.strategy=Performance_BalanceSLLs
-# prop=run.impl_1.strategy=Congestion_SSI_SpreadLogic_high
+# prop=run.impl_1.strategy=Performance_BalanceSLLs
+prop=run.impl_1.strategy=Congestion_SSI_SpreadLogic_high
 
 ### Strategy Performance_SpreadSLL ###
 # A placement variation for SSI devices with tendency to spread SLR crossings horizontally.

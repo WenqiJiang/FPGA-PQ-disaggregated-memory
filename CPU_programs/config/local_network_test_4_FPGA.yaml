@@ -10,9 +10,10 @@
 num_FPGA : 4
 
 CPU_IP_addr : "127.0.0.1"
-FPGA_IP_addr : ["127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1"]
-C2F_port: [8881, 8882, 8883, 8884]
-F2C_port: [5001, 5002, 5003, 5004]
+FPGA_IP_addr_list : ["127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1"]
+C2F_port_list: [8881, 8882, 8883, 8884]
+F2C_port_list: [5001, 5002, 5003, 5004]
+G2C_port: 9091 # only used for FPGA coordinator
 
 # Fixed parameters
 D: 128
@@ -29,8 +30,8 @@ query_window_size: 100
 
 # batch window size controls the speed of index scan on CPU 
 batch_window_size: 4
-# enable_index_scan controls whether to enable index scan on CPU
-enable_index_scan: 1
 
-# CPU cores used for the entire CPU program 
-cpu_cores: 8
+# enable_index_scan controls whether to enable index scan on CPU
+enable_index_scan: 0 # used only in CPU_index_server
+# CPU cores used for the entire CPU program
+cpu_cores: 8 # used only in CPU_index_server

@@ -250,6 +250,7 @@ void LUT_construction_sub_PE(
 				for (int k = 0; k < LUT_ENTRY_NUM; k++) {
 
 				for (int m_per_PE = 0; m_per_PE < (M / LUT_CONSTR_SUB_PE_NUM); m_per_PE++) {
+// #pragma HLS pipeline II=1
 #if D/M <= 8
 	#pragma HLS pipeline II=1 // For small dimensions we can afford to process 128D per cycle
 #elif D/M <= 16
@@ -285,7 +286,7 @@ void gather_LUT_results(
     hls::stream<batch_header_t>& s_batch_header,
     hls::stream<float> (&s_partial_distance_LUT)[LUT_CONSTR_SUB_PE_NUM],
     // output
-    hls::stream<distance_LUT_parallel_t>& s_distance_LUT) {
+    hls::stream<distance_LUT_parallel_t>& s_distance_LUT_buffer) {
 
     while (true) {
 
@@ -318,7 +319,42 @@ void gather_LUT_results(
 								s_partial_distance_LUT[pe_id].read();
 						}
 					}
-					s_distance_LUT.write(row);
+					s_distance_LUT_buffer.write(row);
+				}
+			}
+		}
+	}
+}
+
+
+void extra_LUT_FIFO(
+    // runtime input
+    hls::stream<batch_header_t>& s_batch_header,
+    hls::stream<distance_LUT_parallel_t>& s_distance_LUT_buffer,
+    // output
+    hls::stream<distance_LUT_parallel_t>& s_distance_LUT) {
+
+	// internal buffer of distance LUT
+    while (true) {
+
+        batch_header_t batch_header = s_batch_header.read();
+        int batch_size = batch_header.batch_size;
+        int nprobe = batch_header.nprobe;
+        int terminate = batch_header.terminate;
+		int query_num = batch_size; 
+
+        // termination detection
+        if (terminate) {
+            break;
+        }
+
+		for (int query_id = 0; query_id < query_num; query_id++) {
+
+			for (int nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
+
+				for (int k = 0; k < LUT_ENTRY_NUM; k++) {
+#pragma HLS pipeline II=1
+					s_distance_LUT.write(s_distance_LUT_buffer.read());
 				}
 			}
 		}
@@ -356,7 +392,10 @@ void LUT_construction_wrapper(
 #pragma HLS stream variable=s_sub_center_vectors depth=2
 #pragma HLS array_partition variable=s_sub_center_vectors complete
 
-    const int n_batch_header_streams = 3 + LUT_CONSTR_SUB_PE_NUM;
+	hls::stream<distance_LUT_parallel_t> s_distance_LUT_buffer;
+#pragma HLS stream variable=s_distance_LUT_buffer depth=256 
+
+    const int n_batch_header_streams = 4 + LUT_CONSTR_SUB_PE_NUM;
     hls::stream<batch_header_t> s_batch_header_replicated[n_batch_header_streams];
 #pragma HLS stream variable=s_batch_header_replicated depth=8
 #pragma HLS array_partition variable=s_batch_header_replicated complete
@@ -391,5 +430,10 @@ void LUT_construction_wrapper(
     gather_LUT_results(
         s_batch_header_replicated[2 + LUT_CONSTR_SUB_PE_NUM], 
         s_partial_distance_LUT,
-        s_distance_LUT);
+        s_distance_LUT_buffer);
+
+	extra_LUT_FIFO(
+		s_batch_header_replicated[3 + LUT_CONSTR_SUB_PE_NUM], 
+		s_distance_LUT_buffer,
+		s_distance_LUT);
 }

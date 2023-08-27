@@ -1,4 +1,6 @@
-/* Host CPU communicates with one or multiple FPGAs
+/* 
+
+Host CPU communicates with one or multiple FPGAs, can choose to use index or not.
    2 thread, 1 for sending query, 1 for receiving results
 
  Usage (e.g.):

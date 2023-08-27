@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
 
 	// int* nlist_num_vecs
 	for (int i = 0; i < nlist; i++) {
-		meta_data_init[i + 2 * nlist] = num_vec_per_channel_per_list;
+		meta_data_init[i + 2 * nlist] = 4 * num_vec_per_channel_per_list;
 	}
 
 	size_t PQ_codes_DRAM_0_size = num_vec_AXI_per_channel_per_list * nlist * 64;

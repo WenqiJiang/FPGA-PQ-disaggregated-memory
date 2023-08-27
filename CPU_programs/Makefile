@@ -9,7 +9,7 @@ LINK_OMP = -fopenmp
 
 all: FPGA_simulator \
 	CPU_cooridnator_for_GPU_FPGA \
-	CPU_to_FPGA \
+	CPU_index_server \
 	# CPU_to_single_FPGA \
 	# host_multi_FPGA \
 	# hnswlib_recall \
@@ -21,12 +21,12 @@ CPU_cooridnator_for_GPU_FPGA: CPU_cooridnator_for_GPU_FPGA.cpp
 FPGA_simulator: FPGA_simulator.cpp
 	${CC} ${CLAGS} FPGA_simulator.cpp ${LINK} -o FPGA_simulator
 
-CPU_to_FPGA: CPU_to_FPGA.cpp
-	${CC} ${CLAGS} CPU_to_FPGA.cpp ${LINK} ${LINK_OMP} -o CPU_to_FPGA
+CPU_index_server: CPU_index_server.cpp
+	${CC} ${CLAGS} CPU_index_server.cpp ${LINK} ${LINK_OMP} -o CPU_index_server
 
 .PHONY: clean, cleanall
 
 cleanall: clean
 
 clean:
-	rm FPGA_simulator CPU_to_FPGA CPU_cooridnator_for_GPU_FPGA
+	rm FPGA_simulator CPU_index_server CPU_cooridnator_for_GPU_FPGA

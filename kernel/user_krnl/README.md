@@ -2,7 +2,12 @@
 
 ## P & R issues
 
-While other kernels seem to be fine, `accelerator_D512_M32_batch` does not went through P & R. So we downgrade the number LUT_CONSTR_SUB_PE_NUM from 16 to 8, and choose the `Performance_BalanceSLLs` to fix the P & R issue. 
+For `accelerator_D512_M32_batch` and `accelerator_D1024_M64_batch`, we use extended FIFO for LUT construction, because the LUT construction in those repositories are not fast enough (8 and 16 PEs, respectively, both using II=1), see `LUT_construction.hpp` for details. While for SIFT and Deep with PQ=16, the LUT construction performance can match the line rate (16 PEs, II-1), so no need to add that extra FIFO.
+
+Solved: `accelerator_D512_M32_batch` does not went through P & R. So we downgrade the number LUT_CONSTR_SUB_PE_NUM from 16 to 8, and choose the `Performance_BalanceSLLs` to fix the P & R issue. 
+
+Unsolved: `accelerator_D512_M64_batch`. I tried three P&R strategies, but all failed. Maybe changing LUT_CONSTR_SUB_PE_NUM from 16 to 8 would help.
+
 ## Streaming Processing Kernels
 
 The only difference between SIFT 32 and Deep 32 kernels is the constant definition:

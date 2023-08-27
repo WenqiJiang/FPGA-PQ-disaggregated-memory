@@ -55,7 +55,6 @@ class FPGARetriever {
 public:
 
     const size_t D;  
-    const size_t FPGA_TOPK; 
     const size_t max_batch_num; // need to allocate a buffer to store the header states
 
     const char* CPU_IP_addr; 
@@ -114,12 +113,11 @@ public:
     // constructor
     FPGARetriever(
         const size_t in_D,
-        const size_t in_FPGA_TOPK,
         const size_t in_max_batch_num,
         const char* in_CPU_IP_addr,
         const unsigned int in_F2C_port,
         const unsigned int in_C2F_port) :
-        D(in_D), FPGA_TOPK(in_FPGA_TOPK), max_batch_num(in_max_batch_num), CPU_IP_addr(in_CPU_IP_addr), 
+        D(in_D), max_batch_num(in_max_batch_num), CPU_IP_addr(in_CPU_IP_addr), 
         F2C_port(in_F2C_port), C2F_port(in_C2F_port) {
 
         finish_F2C_query_id = -1;
@@ -449,7 +447,6 @@ int main(int argc, char const *argv[])
 
     FPGARetriever retriever(
         D,
-        FPGA_TOPK,
         MAX_BATCH_NUM, 
         CPU_IP_addr,
         F2C_port,
