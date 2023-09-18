@@ -45,6 +45,7 @@
 #include <netinet/tcp.h>
 
 #include "constants.hpp"
+#include "ring_buffer.hpp"
 // #include "hnswlib_omp/hnswlib.h"
 
 // #define DEBUG // uncomment to activate debug print-statements
@@ -155,6 +156,8 @@ public:
   char* buf_G2C;
   char* buf_C2G;
 
+  RingBuffer* ring_buffer_G2C;
+
   // terminate signal to be sent in the packet header to FPGA
   // it is primarily part of a payload but it is also used as a signal as it affects the control flow
   // TODO: should no longer be used for signaling
@@ -233,6 +236,8 @@ public:
     buf_C2G = (char*) malloc(bytes_C2G_per_batch);
     std::cout << "bytes_C2G_per_batch: " << bytes_C2G_per_batch << std::endl;
 
+	ring_buffer_G2C = new RingBuffer(bytes_G2C_per_batch, G2C_C2F_QUEUE_SIZE);
+
     batch_start_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
     batch_finish_time_array = (std::chrono::system_clock::time_point*) malloc(in_total_batch_num * sizeof(std::chrono::system_clock::time_point));
     batch_duration_ms_array = (double*) malloc(in_total_batch_num * sizeof(double));
@@ -293,7 +298,7 @@ public:
 
     size_t total_G2C_bytes = 0;
     while (total_G2C_bytes < bytes_G2C_per_batch) {
-      int G2C_bytes_this_iter = (bytes_G2C_per_batch - total_G2C_bytes) < G2C_PKG_SIZE ?  (bytes_G2C_per_batch - total_G2C_bytes) : G2C_PKG_SIZE;
+      int G2C_bytes_this_iter = (bytes_G2C_per_batch - total_G2C_bytes) < G2C_PKG_SIZE ? (bytes_G2C_per_batch - total_G2C_bytes) : G2C_PKG_SIZE;
       int G2C_bytes = read(sock_g2c, &buf_G2C[total_G2C_bytes], G2C_bytes_this_iter);
       total_G2C_bytes += G2C_bytes;
 
@@ -308,6 +313,8 @@ public:
     if (total_G2C_bytes != bytes_G2C_per_batch) {
       printf("Receiving error, receiving more bytes than a block\n");
     }      
+	// move to ring buffer
+	ring_buffer_G2C->write_slot(buf_G2C);
   }
 
   void thread_G2C() {
@@ -429,6 +436,7 @@ public:
    */
   void thread_C2F() { 
       
+	char* G2C_conv_buf = (char*) malloc(bytes_G2C_per_batch); // load the G2C slot, and later convert to C2F format
     // wait for ready
     while(!start_F2C) {}
     while(!start_G2C) {}
@@ -444,10 +452,6 @@ public:
 
     // used to temporary store the complete batch of queries as received from GPU
     float *query_batch = (float *)malloc(batch_size * D * sizeof(float));
-    if (query_batch == NULL) {
-      perror("G2C request memory allocation for queries failed");
-      exit(EXIT_FAILURE);
-    }
 
     // used to store the data in the exact format the FPGA expects
     // => the batch of queries is splited up into individual queries and interleaved with cell-ids and corresponsing center-vectors
@@ -481,6 +485,8 @@ public:
       
       sem_wait(&sem_available_batches_to_send);
 
+	  ring_buffer_G2C->read_slot(G2C_conv_buf);
+
       for (int query_id = 0; query_id < batch_size; query_id++) {
 
         // this semaphore controls that the window size is adhered to
@@ -494,7 +500,16 @@ public:
         memcpy(buf_query, current_query, D * bit_byte_const::byte_float);
         // memcpy(buf_center_vectors, center_vectors, n_bytes_center_vectors);
 
-        memcpy(buf_C2F, buf_cell_ids, n_bytes_cell_ids);
+		// header: 16 bytes = batch_size, dim, nprobe, k, all in int32, queries: batch_size * dim * 4 bytes (float32), list_IDs: batch_size * nprobe * 8 bytes (int64)
+   		int G2C_per_batch_bias = 16 + bit_byte_const::byte_float * batch_size * D + bit_byte_const::byte_long_int * query_id * nprobe;
+		for (int nprobe_id = 0; nprobe_id < nprobe; nprobe_id++) {
+			int64_t cell_id = *(int64_t*)(G2C_conv_buf + G2C_per_batch_bias + nprobe_id * 8);
+			int32_t cell_id_int32 = cell_id;
+			std::cout << cell_id << " "; 
+			memcpy(buf_C2F + 4 * nprobe_id, (void*) &cell_id_int32, bit_byte_const::byte_int);
+		}
+
+		// DUMMY query & center vectors
         memcpy(buf_C2F + n_bytes_cell_ids, buf_query, n_bytes_query_vector);
         memcpy(buf_C2F + n_bytes_cell_ids + n_bytes_query_vector, buf_center_vectors, n_bytes_center_vectors);
         send_C2F_query();

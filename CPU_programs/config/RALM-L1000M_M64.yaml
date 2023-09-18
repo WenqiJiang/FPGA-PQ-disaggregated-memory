@@ -12,10 +12,10 @@ num_FPGA : 2
 # CPU_IP_addr : "127.0.0.1"
 CPU_IP_addr : "10.1.212.110"
 # FPGA_IP_addr_list : ["127.0.0.1", "127.0.0.1", "127.0.0.1", "127.0.0.1"]
-FPGA_IP_addr_list : ["10.253.74.28", "10.253.74.40"]
-C2F_port_list: [8885, 8886]
-F2C_port_list: [5005, 5006]
-G2C_port: 9092 # only used for FPGA coordinator
+FPGA_IP_addr_list : ["10.253.74.28", "10.253.74.16"]
+C2F_port_list: [8885, 8882]
+F2C_port_list: [5005, 5002]
+G2C_port: 9091 # only used for FPGA coordinator
 
 # Fixed parameters
 D: 1024
